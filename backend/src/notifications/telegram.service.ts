@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
-import { ValueBetEntity } from '../../value-bets/domain/entities/value-bet.entity';
+import { ValueBetEntity } from '../value-bets/domain/entities/value-bet.entity';
 
 @Injectable()
 export class TelegramService {

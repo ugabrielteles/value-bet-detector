@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { ValueBet, ValueBetDocument } from '../../value-bets/infrastructure/models/value-bet.model';
+import { ValueBet, ValueBetDocument } from '../../../value-bets/infrastructure/models/value-bet.model';
 
 export interface AnalyticsSummary {
   totalBets: number;

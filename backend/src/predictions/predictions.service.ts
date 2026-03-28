@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PoissonModel } from '../application/models/poisson.model';
-import { LogisticRegressionModel } from '../application/models/logistic-regression.model';
-import { XGBoostModel } from '../application/models/xgboost.model';
+import { PoissonModel } from './application/models/poisson.model';
+import { LogisticRegressionModel } from './application/models/logistic-regression.model';
+import { XGBoostModel } from './application/models/xgboost.model';
 import { PredictionsRepository } from './infrastructure/repositories/predictions.repository';
 import { PredictionInput, PredictionResult } from './domain/interfaces/prediction-model.interface';
 import { PredictionEntity } from './domain/entities/prediction.entity';

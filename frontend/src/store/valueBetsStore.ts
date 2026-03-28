@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ValueBet, ValueBetFilters } from '../types'
-import { valueBetsApi } from '../services/api'
+import { matchesApi, valueBetsApi } from '../services/api'
 
 interface ValueBetsState {
   valueBets: ValueBet[]
@@ -53,9 +53,24 @@ export const useValueBetsStore = create<ValueBetsState>((set, get) => ({
       cleanFilters.limit = activeFilters.limit ?? 20
 
       const response = await valueBetsApi.getValueBets(cleanFilters)
+      const uniqueMatchIds = [...new Set(response.data.map((bet) => bet.matchId))]
+      const matchesResult = await Promise.allSettled(uniqueMatchIds.map((id) => matchesApi.getMatch(id)))
+
+      const matchMap = new Map<string, Awaited<ReturnType<typeof matchesApi.getMatch>>>()
+      matchesResult.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          matchMap.set(uniqueMatchIds[index], result.value)
+        }
+      })
+
+      const dataWithMatch = response.data.map((bet) => ({
+        ...bet,
+        match: bet.match ?? matchMap.get(bet.matchId),
+      }))
+
       set({
-        valueBets: response.data,
-        filteredBets: response.data,
+        valueBets: dataWithMatch,
+        filteredBets: dataWithMatch,
         total: response.total,
         currentPage: response.page,
         totalPages: response.totalPages,

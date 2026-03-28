@@ -6,9 +6,10 @@ export function useAuth() {
   const { user, isAuthenticated, isLoading, login, logout } = useAuthStore()
 
   const register = async (data: RegisterData) => {
-    const { tokens } = await authApi.register(data)
-    localStorage.setItem('accessToken', tokens.accessToken)
-    localStorage.setItem('refreshToken', tokens.refreshToken)
+    const { accessToken, refreshToken } = await authApi.register(data)
+    const tokens = { accessToken, refreshToken }
+    localStorage.setItem('accessToken', accessToken)
+    localStorage.setItem('refreshToken', refreshToken)
     const me = await authApi.getMe()
     useAuthStore.setState({ user: me, tokens, isAuthenticated: true })
   }

@@ -1,0 +1,752 @@
+{
+  "info": {
+    "_postman_id": "63d80a9b-14d4-47ef-9547-6f241370a7da",
+    "name": "Value Bet Detector API",
+    "description": "Collection generated from the NestJS backend controllers. Most endpoints require Bearer auth via {{accessToken}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.expect(pm.response.code).to.eql(201);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "if (json.accessToken) pm.environment.set('accessToken', json.accessToken);",
+                  "if (json.refreshToken) pm.environment.set('refreshToken', json.refreshToken);",
+                  "if (json.user && json.user.id) pm.environment.set('userId', json.user.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Creates a new user and stores returned tokens in the active Postman environment."
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.expect(pm.response.code).to.eql(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "if (json.accessToken) pm.environment.set('accessToken', json.accessToken);",
+                  "if (json.refreshToken) pm.environment.set('refreshToken', json.refreshToken);",
+                  "if (json.user && json.user.id) pm.environment.set('userId', json.user.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Authenticates a user and stores access/refresh tokens in the active environment."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.expect(pm.response.code).to.eql(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "if (json.accessToken) pm.environment.set('accessToken', json.accessToken);",
+                  "if (json.refreshToken) pm.environment.set('refreshToken', json.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Current User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.id) pm.environment.set('userId', json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"username\": \"{{username}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Matches",
+      "item": [
+        {
+          "name": "List Matches",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = Array.isArray(json) ? json[0] : Array.isArray(json.data) ? json.data[0] : Array.isArray(json.items) ? json.items[0] : Array.isArray(json.docs) ? json.docs[0] : null;",
+                  "if (first && first.id) pm.environment.set('matchId', first.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/matches?status={{matchStatus}}&league={{league}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "matches"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "{{matchStatus}}"
+                },
+                {
+                  "key": "league",
+                  "value": "{{league}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Match By Id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/matches/{{matchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "matches",
+                "{{matchId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Match Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/matches/{{matchId}}/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "matches",
+                "{{matchId}}",
+                "stats"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Odds",
+      "item": [
+        {
+          "name": "Get Latest Odds",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/odds/{{matchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "odds",
+                "{{matchId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Odds History",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/odds/{{matchId}}/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "odds",
+                "{{matchId}}",
+                "history"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Steam Alerts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/odds/{{matchId}}/steam-alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "odds",
+                "{{matchId}}",
+                "steam-alerts"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Predictions",
+      "item": [
+        {
+          "name": "Get Prediction",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/predictions/{{matchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predictions",
+                "{{matchId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Run Prediction",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/predictions/{{matchId}}/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predictions",
+                "{{matchId}}",
+                "run"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "Get Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/analytics/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "summary"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Daily Performance",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/analytics/daily-performance?days={{days}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "daily-performance"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "{{days}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Performance By Category",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/analytics/performance-by-category",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "performance-by-category"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Performance By Market",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/analytics/performance-by-market",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "performance-by-market"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Value Bets",
+      "item": [
+        {
+          "name": "List Active Value Bets",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = Array.isArray(json) ? json[0] : Array.isArray(json.data) ? json.data[0] : Array.isArray(json.items) ? json.items[0] : Array.isArray(json.docs) ? json.docs[0] : null;",
+                  "if (first && first.id) pm.environment.set('valueBetId', first.id);",
+                  "if (first && first.classification) pm.environment.set('classification', first.classification);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/value-bets?page={{page}}&limit={{limit}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "value-bets"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Value Bets By Classification",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/value-bets/classification/{{classification}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "value-bets",
+                "classification",
+                "{{classification}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Value Bets By Match",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/value-bets/match/{{matchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "value-bets",
+                "match",
+                "{{matchId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Resolve Value Bet",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"{{valueBetStatus}}\",\n  \"stakeAmount\": {{stakeAmount}}\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/value-bets/{{valueBetId}}/resolve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "value-bets",
+                "{{valueBetId}}",
+                "resolve"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bankroll",
+      "item": [
+        {
+          "name": "Get Bankroll",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/bankroll",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bankroll"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Bankroll",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"initialBankroll\": 1000,\n  \"currentBankroll\": 1000,\n  \"minBetPercentage\": 1,\n  \"maxBetPercentage\": 5,\n  \"strategy\": \"kelly\",\n  \"useKellyCriterion\": true,\n  \"kellyFraction\": 0.5,\n  \"stopLossEnabled\": true,\n  \"stopLossPercentage\": 20,\n  \"currency\": \"{{currency}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bankroll",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bankroll"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Stake Recommendation",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/bankroll/stake-recommendation?modelProbability={{modelProbability}}&decimalOdds={{decimalOdds}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bankroll",
+                "stake-recommendation"
+              ],
+              "query": [
+                {
+                  "key": "modelProbability",
+                  "value": "{{modelProbability}}"
+                },
+                {
+                  "key": "decimalOdds",
+                  "value": "{{decimalOdds}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Simulator",
+      "item": [
+        {
+          "name": "Run Simulation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{simulationName}}\",\n  \"initialBankroll\": 1000,\n  \"strategy\": \"kelly\",\n  \"flatStakeAmount\": 25,\n  \"percentageStake\": 2,\n  \"kellyFraction\": 0.5,\n  \"minOdds\": 1.5,\n  \"maxOdds\": 3.5,\n  \"minValue\": 3,\n  \"onlyHighValue\": false,\n  \"dateFrom\": \"2025-01-01T00:00:00.000Z\",\n  \"dateTo\": \"2025-12-31T23:59:59.999Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/simulator/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "simulator",
+                "run"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List User Simulations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = Array.isArray(json) ? json[0] : Array.isArray(json.data) ? json.data[0] : null;",
+                  "if (first && first.id) pm.environment.set('simulationId', first.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/simulator",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "simulator"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Simulation By Id",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/simulator/{{simulationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "simulator",
+                "{{simulationId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Simulation Chart",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/simulator/{{simulationId}}/chart",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "simulator",
+                "{{simulationId}}",
+                "chart"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": []
+}

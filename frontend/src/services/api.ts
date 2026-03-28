@@ -1,4 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { ValueCategory } from '../types'
 import type {
   LoginCredentials,
   RegisterData,
@@ -32,6 +33,36 @@ const api = axios.create({
   baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 })
+
+type BackendValueBet = {
+  id: string
+  matchId: string
+  market: string
+  outcome: string
+  bookmaker: string
+  bookmakerOdds: number
+  modelProbability: number
+  impliedProbability: number
+  value?: number
+  valueScore?: number
+  classification?: ValueCategory
+  valueCategory?: ValueCategory
+  status: BetStatus
+  detectedAt: string
+  resolvedAt?: string
+}
+
+function normalizeValueBet(bet: BackendValueBet): ValueBet {
+  const valueScore = bet.valueScore ?? bet.value ?? 0
+  const valueCategory = bet.valueCategory ?? bet.classification ?? ValueCategory.LOW
+
+  return {
+    ...bet,
+    market: bet.market as ValueBet['market'],
+    valueScore,
+    valueCategory,
+  }
+}
 
 // Queue for failed requests during token refresh
 let isRefreshing = false
@@ -124,10 +155,10 @@ export default api
 // Auth API
 export const authApi = {
   login: (credentials: LoginCredentials) =>
-    api.post<{ user: User; tokens: AuthTokens }>('/auth/login', credentials).then((r) => r.data),
+    api.post<{ user: User; accessToken: string; refreshToken: string }>('/auth/login', credentials).then((r) => r.data),
 
   register: (data: RegisterData) =>
-    api.post<{ user: User; tokens: AuthTokens }>('/auth/register', data).then((r) => r.data),
+    api.post<{ user: User; accessToken: string; refreshToken: string }>('/auth/register', data).then((r) => r.data),
 
   refreshToken: (refreshToken: string) =>
     api.post<AuthTokens>('/auth/refresh', { refreshToken }).then((r) => r.data),
@@ -155,8 +186,8 @@ export const oddsApi = {
       .get<OddsHistory[]>(`/odds/${matchId}/history`, { params: market ? { market } : undefined })
       .then((r) => r.data),
 
-  getSteamAlerts: (params?: Record<string, string | number>) =>
-    api.get<SteamAlert[]>('/odds/steam-alerts', { params }).then((r) => r.data),
+  getSteamAlerts: (matchId: string) =>
+    api.get<SteamAlert[]>(`/odds/${matchId}/steam-alerts`).then((r) => r.data),
 }
 
 // Predictions API
@@ -172,12 +203,26 @@ export const predictionsApi = {
 export const valueBetsApi = {
   getValueBets: (filters?: ValueBetFilters) =>
     api
-      .get<PaginatedResponse<ValueBet>>('/value-bets', {
+      .get<{ data: BackendValueBet[]; total: number; page?: number; limit?: number; totalPages?: number }>('/value-bets', {
         params: filters as Record<string, string | number | undefined>,
       })
-      .then((r) => r.data),
+      .then((r) => {
+        const page = Number(filters?.page ?? r.data.page ?? 1)
+        const limit = Number(filters?.limit ?? r.data.limit ?? 20)
+        const normalizedData = (r.data.data ?? []).map(normalizeValueBet)
+        const total = Number(r.data.total ?? normalizedData.length)
 
-  getValueBet: (id: string) => api.get<ValueBet>(`/value-bets/${id}`).then((r) => r.data),
+        return {
+          data: normalizedData,
+          total,
+          page,
+          limit,
+          totalPages: r.data.totalPages ?? Math.max(1, Math.ceil(total / Math.max(limit, 1))),
+        } as PaginatedResponse<ValueBet>
+      }),
+
+  getValueBet: (id: string) =>
+    api.get<BackendValueBet[]>(`/value-bets/match/${id}`).then((r) => (r.data[0] ? normalizeValueBet(r.data[0]) : null)),
 }
 
 export const resolveValueBet = (id: string, status: BetStatus, stakeAmount?: number) =>
@@ -190,9 +235,11 @@ export const bankrollApi = {
   updateBankroll: (data: UpdateBankrollData) =>
     api.put<Bankroll>('/bankroll', data).then((r) => r.data),
 
-  getStakeRecommendation: (valueBetId: string) =>
+  getStakeRecommendation: (modelProbability: number, decimalOdds: number) =>
     api
-      .get<StakeRecommendation>(`/bankroll/stake-recommendation/${valueBetId}`)
+      .get<StakeRecommendation>('/bankroll/stake-recommendation', {
+        params: { modelProbability, decimalOdds },
+      })
       .then((r) => r.data),
 }
 
@@ -206,10 +253,10 @@ export const analyticsApi = {
       .then((r) => r.data),
 
   getPerformanceByCategory: () =>
-    api.get<PerformanceByCategory[]>('/analytics/by-category').then((r) => r.data),
+    api.get<PerformanceByCategory[]>('/analytics/performance-by-category').then((r) => r.data),
 
   getPerformanceByMarket: () =>
-    api.get<PerformanceByMarket[]>('/analytics/by-market').then((r) => r.data),
+    api.get<PerformanceByMarket[]>('/analytics/performance-by-market').then((r) => r.data),
 }
 
 // Simulator API

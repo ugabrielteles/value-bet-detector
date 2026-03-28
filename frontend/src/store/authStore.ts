@@ -26,10 +26,10 @@ export const useAuthStore = create<AuthState>()(
       login: async (credentials: LoginCredentials) => {
         set({ isLoading: true })
         try {
-          const { user, tokens } = await authApi.login(credentials)
-          localStorage.setItem('accessToken', tokens.accessToken)
-          localStorage.setItem('refreshToken', tokens.refreshToken)
-          set({ user, tokens, isAuthenticated: true, isLoading: false })
+          const { user, accessToken, refreshToken } = await authApi.login(credentials)
+          localStorage.setItem('accessToken', accessToken)
+          localStorage.setItem('refreshToken', refreshToken)
+          set({ user, tokens: { accessToken, refreshToken }, isAuthenticated: true, isLoading: false })
         } catch (error) {
           set({ isLoading: false })
           throw error
@@ -39,10 +39,10 @@ export const useAuthStore = create<AuthState>()(
       register: async (data: RegisterData) => {
         set({ isLoading: true })
         try {
-          const { user, tokens } = await authApi.register(data)
-          localStorage.setItem('accessToken', tokens.accessToken)
-          localStorage.setItem('refreshToken', tokens.refreshToken)
-          set({ user, tokens, isAuthenticated: true, isLoading: false })
+          const { user, accessToken, refreshToken } = await authApi.register(data)
+          localStorage.setItem('accessToken', accessToken)
+          localStorage.setItem('refreshToken', refreshToken)
+          set({ user, tokens: { accessToken, refreshToken }, isAuthenticated: true, isLoading: false })
         } catch (error) {
           set({ isLoading: false })
           throw error

@@ -65,6 +65,8 @@ export default function MatchDetail() {
     cancelled: 'bg-red-900 text-red-300',
   }
 
+  const getValueScore = (bet: ValueBet) => bet.valueScore ?? bet.value ?? 0
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       {/* Back */}
@@ -195,10 +197,10 @@ export default function MatchDetail() {
                         {(bet.modelProbability * 100).toFixed(1)}%
                       </td>
                       <td className="px-5 py-3 text-right text-amber-400">
-                        +{(bet.valueScore * 100).toFixed(1)}%
+                        +{(getValueScore(bet) * 100).toFixed(1)}%
                       </td>
                       <td className="px-5 py-3 text-center">
-                        <CategoryBadge category={bet.valueCategory} />
+                        <CategoryBadge category={bet.valueCategory ?? bet.classification ?? 'LOW'} />
                       </td>
                       <td className="px-5 py-3 text-center">
                         <StatusBadge status={bet.status} />

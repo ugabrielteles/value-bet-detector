@@ -122,7 +122,7 @@ export type BetStatus = 'pending' | 'won' | 'lost' | 'void'
 export interface ValueBet {
   id: string
   matchId: string
-  match: Match
+  match?: Match
   market: Market
   outcome: string
   bookmaker: string
@@ -131,6 +131,8 @@ export interface ValueBet {
   impliedProbability: number
   valueScore: number
   valueCategory: ValueCategory
+  value?: number
+  classification?: ValueCategory
   status: BetStatus
   detectedAt: string
   resolvedAt?: string

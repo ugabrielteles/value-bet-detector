@@ -1,14 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
-import * as helmet from 'helmet';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './shared/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  app.use((helmet as unknown as { default: typeof helmet })?.default?.() ?? (helmet as unknown as () => unknown)());
+  app.use(helmet());
 
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:5173',

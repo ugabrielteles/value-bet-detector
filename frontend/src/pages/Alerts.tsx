@@ -10,6 +10,8 @@ import { Link } from 'react-router-dom'
 
 type SortKey = 'valueScore' | 'bookmakerOdds' | 'detectedAt'
 
+const getValueScore = (bet: ValueBet) => bet.valueScore ?? bet.value ?? 0
+
 export default function Alerts() {
   const newAlertsCount = useValueBetsStore((s) => s.newAlertsCount)
   const clearNewAlerts = useValueBetsStore((s) => s.clearNewAlerts)
@@ -40,7 +42,7 @@ export default function Alerts() {
   }, [statusFilter, categoryFilter])
 
   const sorted = [...bets].sort((a, b) => {
-    if (sortBy === 'valueScore') return b.valueScore - a.valueScore
+    if (sortBy === 'valueScore') return getValueScore(b) - getValueScore(a)
     if (sortBy === 'bookmakerOdds') return b.bookmakerOdds - a.bookmakerOdds
     return new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime()
   })
@@ -132,16 +134,16 @@ export default function Alerts() {
                     to={`/matches/${bet.matchId}`}
                     className="text-sm font-semibold text-white hover:text-blue-400 transition-colors"
                   >
-                    {bet.match.homeTeam.name} vs {bet.match.awayTeam.name}
+                    {bet.match?.homeTeam?.name ?? 'Home Team'} vs {bet.match?.awayTeam?.name ?? 'Away Team'}
                   </Link>
                   <div className="text-xs text-gray-400 mt-0.5">
-                    {bet.match.league.name} · {bet.market} · {bet.outcome} · {bet.bookmaker}
+                    {bet.match?.league?.name ?? 'Unknown League'} · {bet.market} · {bet.outcome} · {bet.bookmaker}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-sm font-bold text-amber-400">+{(bet.valueScore * 100).toFixed(1)}%</span>
+                  <span className="text-sm font-bold text-amber-400">+{(getValueScore(bet) * 100).toFixed(1)}%</span>
                   <span className="text-sm text-white">{bet.bookmakerOdds.toFixed(2)}</span>
-                  <CategoryBadge category={bet.valueCategory} />
+                  <CategoryBadge category={bet.valueCategory ?? bet.classification ?? 'LOW'} />
                   <StatusBadge status={bet.status} />
                 </div>
               </div>

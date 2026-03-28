@@ -20,22 +20,23 @@ function formatMarket(market: string): string {
 export function ValueBetCard({ bet }: ValueBetCardProps) {
   const { match } = bet
   const detectedDate = new Date(bet.detectedAt)
+  const valuePct = (bet.valueScore ?? bet.value ?? 0) * 100
 
   return (
     <Card className="hover:border-gray-600 transition-colors">
       <CardBody className="p-4">
         {/* Teams & League */}
-        <Link to={`/matches/${match.id}`} className="block mb-3 group">
+        <Link to={`/matches/${bet.matchId}`} className="block mb-3 group">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-gray-400">{match.league.name}</span>
-            <span className="text-xs text-gray-500">{match.league.country}</span>
+            <span className="text-xs text-gray-400">{match?.league?.name ?? 'Unknown League'}</span>
+            <span className="text-xs text-gray-500">{match?.league?.country ?? '--'}</span>
           </div>
           <div className="flex items-center justify-center gap-2 text-sm font-semibold group-hover:text-blue-400 transition-colors">
-            <span className="truncate max-w-[100px] text-right">{match.homeTeam.name}</span>
+            <span className="truncate max-w-[100px] text-right">{match?.homeTeam?.name ?? 'Home Team'}</span>
             <span className="text-gray-500 text-xs shrink-0">vs</span>
-            <span className="truncate max-w-[100px]">{match.awayTeam.name}</span>
+            <span className="truncate max-w-[100px]">{match?.awayTeam?.name ?? 'Away Team'}</span>
           </div>
-          {(match.homeScore !== undefined && match.awayScore !== undefined) && (
+          {(match?.homeScore !== undefined && match?.awayScore !== undefined) && (
             <div className="text-center text-sm font-bold text-blue-400 mt-1">
               {match.homeScore} – {match.awayScore}
             </div>
@@ -65,7 +66,7 @@ export function ValueBetCard({ bet }: ValueBetCardProps) {
           <div className="bg-gray-700/50 rounded-lg p-2">
             <div className="text-xs text-gray-400 mb-0.5">Value</div>
             <div className="text-sm font-bold text-amber-400">
-              +{(bet.valueScore * 100).toFixed(1)}%
+              +{valuePct.toFixed(1)}%
             </div>
           </div>
         </div>
@@ -73,7 +74,7 @@ export function ValueBetCard({ bet }: ValueBetCardProps) {
         {/* Footer */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <CategoryBadge category={bet.valueCategory} />
+            <CategoryBadge category={bet.valueCategory ?? bet.classification ?? 'LOW'} />
             <StatusBadge status={bet.status} />
           </div>
           <div className="text-right">

@@ -14,6 +14,7 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: FormEvent) => {
+    debugger
     e.preventDefault()
     setError(null)
 

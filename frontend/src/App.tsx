@@ -11,6 +11,7 @@ import Alerts from './pages/Alerts'
 import Analytics from './pages/Analytics'
 import BankrollSettings from './pages/BankrollSettings'
 import Simulator from './pages/Simulator'
+import DataIngestion from './pages/DataIngestion'
 
 function ProtectedRoute() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -45,6 +46,7 @@ function AppRoutes() {
         <Route path="/matches/:id" element={<MatchDetail />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/data-ingestion" element={<DataIngestion />} />
         <Route path="/simulator" element={<Simulator />} />
         <Route path="/bankroll" element={<BankrollSettings />} />
       </Route>

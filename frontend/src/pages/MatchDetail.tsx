@@ -48,7 +48,7 @@ export default function MatchDetail() {
 
   if (error || !match) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-20 text-center">
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
         <p className="text-red-400 mb-2">Failed to load match details</p>
         <p className="text-gray-500 text-sm">{error}</p>
         <Link to="/dashboard" className="text-blue-400 hover:underline mt-4 block">
@@ -68,7 +68,7 @@ export default function MatchDetail() {
   const getValueScore = (bet: ValueBet) => bet.valueScore ?? bet.value ?? 0
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       {/* Back */}
       <Link to="/dashboard" className="text-sm text-gray-400 hover:text-white flex items-center gap-1">
         ← Back to Dashboard

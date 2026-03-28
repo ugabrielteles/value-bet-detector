@@ -5,6 +5,7 @@ import { Card, CardHeader, CardBody } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Input, Select } from '../components/ui/Input'
 import { Spinner } from '../components/ui/Spinner'
+import { useI18n } from '../hooks/useI18n'
 
 export default function BankrollSettings() {
   const [bankroll, setBankroll] = useState<Bankroll | null>(null)
@@ -23,6 +24,7 @@ export default function BankrollSettings() {
   const [kellyFraction, setKellyFraction] = useState(0.25)
   const [stopLossEnabled, setStopLossEnabled] = useState(false)
   const [stopLossPct, setStopLossPct] = useState(20)
+  const { dict } = useI18n()
 
   useEffect(() => {
     bankrollApi
@@ -63,10 +65,10 @@ export default function BankrollSettings() {
     try {
       const updated = await bankrollApi.updateBankroll(data)
       setBankroll(updated)
-      setSuccessMsg('Settings saved successfully!')
+      setSuccessMsg(dict.bankroll.saveSuccess)
       setTimeout(() => setSuccessMsg(null), 3000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save settings')
+      setError(err instanceof Error ? err.message : dict.bankroll.saveFailed)
     } finally {
       setIsSaving(false)
     }
@@ -84,10 +86,10 @@ export default function BankrollSettings() {
   const roiColor = bankroll && bankroll.roi >= 0 ? 'text-green-400' : 'text-red-400'
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Bankroll Settings</h1>
-        <p className="text-gray-400 text-sm mt-1">Configure your betting bankroll and staking strategy</p>
+        <h1 className="text-2xl font-bold text-white">{dict.bankroll.title}</h1>
+        <p className="text-gray-400 text-sm mt-1">{dict.bankroll.subtitle}</p>
       </div>
 
       {/* Status Cards */}
@@ -95,7 +97,7 @@ export default function BankrollSettings() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Card>
             <CardBody className="py-3">
-              <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">Current</div>
+              <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">{dict.bankroll.current}</div>
               <div className="text-xl font-bold text-white">
                 {bankroll.currency} {bankroll.currentBankroll.toFixed(2)}
               </div>
@@ -103,7 +105,7 @@ export default function BankrollSettings() {
           </Card>
           <Card>
             <CardBody className="py-3">
-              <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">Initial</div>
+              <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">{dict.bankroll.initial}</div>
               <div className="text-xl font-bold text-white">
                 {bankroll.currency} {bankroll.initialBankroll.toFixed(2)}
               </div>
@@ -133,9 +135,9 @@ export default function BankrollSettings() {
         <div className="bg-red-900/40 border border-red-700 rounded-xl p-4 flex items-center gap-3">
           <span className="text-2xl">⛔</span>
           <div>
-            <div className="font-semibold text-red-300">Stop-Loss Triggered</div>
+            <div className="font-semibold text-red-300">{dict.bankroll.stopLossTriggered}</div>
             <div className="text-sm text-red-400">
-              Your bankroll has fallen below the stop-loss threshold. Betting is paused.
+              {dict.bankroll.stopLossTriggeredHint}
             </div>
           </div>
         </div>
@@ -143,7 +145,7 @@ export default function BankrollSettings() {
 
       {/* Strategy */}
       <Card>
-        <CardHeader><h2 className="font-semibold text-white">Staking Strategy</h2></CardHeader>
+        <CardHeader><h2 className="font-semibold text-white">{dict.bankroll.stakingStrategy}</h2></CardHeader>
         <CardBody className="space-y-5">
           <div className="flex gap-2">
             {(['flat', 'kelly', 'percentage'] as BettingStrategy[]).map((s) => (
@@ -156,14 +158,14 @@ export default function BankrollSettings() {
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                 }`}
               >
-                {s === 'kelly' ? 'Kelly' : s.charAt(0).toUpperCase() + s.slice(1)}
+                {s === 'kelly' ? dict.bankroll.kelly : s.charAt(0).toUpperCase() + s.slice(1)}
               </button>
             ))}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <Input
-              label={`Initial Bankroll (${currency})`}
+              label={`${dict.bankroll.initialBankrollWithCurrency} (${currency})`}
               type="number"
               min="10"
               step="10"
@@ -171,7 +173,7 @@ export default function BankrollSettings() {
               onChange={(e) => setInitialBankroll(parseFloat(e.target.value) || 0)}
             />
             <Select
-              label="Currency"
+              label={dict.bankroll.currency}
               value={currency}
               onChange={(e) => setCurrency(e.target.value)}
             >
@@ -185,7 +187,7 @@ export default function BankrollSettings() {
           <div className="space-y-4">
             <div>
               <div className="flex justify-between text-sm mb-1">
-                <label className="text-gray-300">Min Bet %</label>
+                <label className="text-gray-300">{dict.bankroll.minBetPct}</label>
                 <span className="text-white font-medium">{minBetPct}%</span>
               </div>
               <input
@@ -197,7 +199,7 @@ export default function BankrollSettings() {
             </div>
             <div>
               <div className="flex justify-between text-sm mb-1">
-                <label className="text-gray-300">Max Bet %</label>
+                <label className="text-gray-300">{dict.bankroll.maxBetPct}</label>
                 <span className="text-white font-medium">{maxBetPct}%</span>
               </div>
               <input
@@ -218,15 +220,15 @@ export default function BankrollSettings() {
               onChange={(e) => setUseKelly(e.target.checked)}
               className="w-4 h-4 accent-blue-500"
             />
-            <label htmlFor="useKelly" className="text-sm text-gray-300">Use Kelly Criterion</label>
+            <label htmlFor="useKelly" className="text-sm text-gray-300">{dict.bankroll.useKelly}</label>
           </div>
 
           {useKelly && (
             <div>
               <div className="flex justify-between text-sm mb-1">
-                <label className="text-gray-300">Kelly Fraction</label>
+                <label className="text-gray-300">{dict.bankroll.kellyFraction}</label>
                 <span className="text-white font-medium">
-                  {kellyFraction === 0.5 ? 'Half-Kelly' : kellyFraction === 0.25 ? 'Quarter-Kelly' : `${(kellyFraction * 100).toFixed(0)}%`}
+                  {kellyFraction === 0.5 ? dict.bankroll.halfKelly : kellyFraction === 0.25 ? dict.bankroll.quarterKelly : `${(kellyFraction * 100).toFixed(0)}%`}
                 </span>
               </div>
               <input
@@ -237,9 +239,9 @@ export default function BankrollSettings() {
               />
               <div className="flex justify-between text-xs text-gray-500 mt-1">
                 <span>10%</span>
-                <span>Quarter-Kelly</span>
-                <span>Half-Kelly</span>
-                <span>Full</span>
+                <span>{dict.bankroll.quarterKelly}</span>
+                <span>{dict.bankroll.halfKelly}</span>
+                <span>{dict.bankroll.full}</span>
               </div>
             </div>
           )}
@@ -248,7 +250,7 @@ export default function BankrollSettings() {
 
       {/* Stop-Loss */}
       <Card>
-        <CardHeader><h2 className="font-semibold text-white">Stop-Loss Protection</h2></CardHeader>
+        <CardHeader><h2 className="font-semibold text-white">{dict.bankroll.stopLossProtection}</h2></CardHeader>
         <CardBody className="space-y-4">
           <div className="flex items-center gap-3">
             <input
@@ -258,13 +260,13 @@ export default function BankrollSettings() {
               onChange={(e) => setStopLossEnabled(e.target.checked)}
               className="w-4 h-4 accent-blue-500"
             />
-            <label htmlFor="stopLoss" className="text-sm text-gray-300">Enable Stop-Loss</label>
+            <label htmlFor="stopLoss" className="text-sm text-gray-300">{dict.bankroll.enableStopLoss}</label>
           </div>
 
           {stopLossEnabled && (
             <div>
               <div className="flex justify-between text-sm mb-1">
-                <label className="text-gray-300">Stop-Loss Threshold</label>
+                <label className="text-gray-300">{dict.bankroll.stopLossThreshold}</label>
                 <span className="text-white font-medium">{stopLossPct}%</span>
               </div>
               <input
@@ -274,7 +276,7 @@ export default function BankrollSettings() {
                 className="w-full accent-red-500"
               />
               <p className="text-xs text-gray-500 mt-2">
-                Betting will pause if your bankroll drops by {stopLossPct}% from its initial value
+                {dict.bankroll.stopLossHint} {stopLossPct}% {dict.bankroll.fromInitialValue}
                 ({currency} {((1 - stopLossPct / 100) * initialBankroll).toFixed(2)}).
               </p>
             </div>
@@ -284,11 +286,11 @@ export default function BankrollSettings() {
 
       {/* Strategy Guide */}
       <Card>
-        <CardHeader><h2 className="font-semibold text-white">Strategy Guide</h2></CardHeader>
+        <CardHeader><h2 className="font-semibold text-white">{dict.bankroll.strategyGuide}</h2></CardHeader>
         <CardBody className="text-sm text-gray-400 space-y-2">
-          <p><span className="text-white font-medium">Flat Staking:</span> Bet the same fixed amount each time. Simple and predictable.</p>
-          <p><span className="text-white font-medium">Kelly Criterion:</span> Mathematically optimal bet sizing based on edge. Use a fraction (0.25–0.5) for safety.</p>
-          <p><span className="text-white font-medium">Percentage:</span> Bet a fixed % of your current bankroll each time. Adapts to wins/losses.</p>
+          <p><span className="text-white font-medium">{dict.bankroll.flatStaking}:</span> {dict.bankroll.flatStakingHint}</p>
+          <p><span className="text-white font-medium">{dict.bankroll.useKelly}:</span> {dict.bankroll.kellyHint}</p>
+          <p><span className="text-white font-medium">{dict.simulator.percentage}:</span> {dict.bankroll.percentageHint}</p>
         </CardBody>
       </Card>
 
@@ -301,7 +303,7 @@ export default function BankrollSettings() {
       )}
 
       <Button variant="primary" size="lg" onClick={handleSave} isLoading={isSaving} className="w-full">
-        Save Settings
+        {dict.bankroll.saveSettings}
       </Button>
     </div>
   )

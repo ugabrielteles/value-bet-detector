@@ -7,6 +7,7 @@ import { FiltersBar } from '../components/dashboard/FiltersBar'
 import { Spinner } from '../components/ui/Spinner'
 import { Button } from '../components/ui/Button'
 import type { ValueBetFilters } from '../types'
+import { useI18n } from '../hooks/useI18n'
 
 export default function Dashboard() {
   const [filters, setFilters] = useState<ValueBetFilters>({ status: 'all', category: 'all', page: 1, limit: 20 })
@@ -14,6 +15,7 @@ export default function Dashboard() {
 
   const newAlertsCount = useValueBetsStore((s) => s.newAlertsCount)
   const clearNewAlerts = useValueBetsStore((s) => s.clearNewAlerts)
+  const { dict } = useI18n()
 
   const { filteredBets, isLoading, error, total, currentPage, totalPages, refetch } = useValueBets(filters)
 
@@ -35,8 +37,8 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Value Bet Detector</h1>
-          <p className="text-gray-400 text-sm mt-1">{total} bets found</p>
+          <h1 className="text-2xl font-bold text-white">{dict.dashboard.title}</h1>
+          <p className="text-gray-400 text-sm mt-1">{total} {dict.dashboard.betsFound}</p>
         </div>
         <div className="flex items-center gap-3">
           {newAlertsCount > 0 && (
@@ -45,7 +47,7 @@ export default function Dashboard() {
               className="flex items-center gap-2 bg-red-900/40 border border-red-700 text-red-300 px-3 py-1.5 rounded-lg text-sm hover:bg-red-900/60 transition-colors"
             >
               <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
-              {newAlertsCount} new alert{newAlertsCount !== 1 ? 's' : ''}
+              {newAlertsCount} {newAlertsCount !== 1 ? dict.dashboard.newAlerts : dict.dashboard.newAlert}
             </button>
           )}
           <div className="flex items-center gap-2 text-sm">
@@ -53,7 +55,7 @@ export default function Dashboard() {
               className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`}
             />
             <span className={isConnected ? 'text-green-400' : 'text-gray-500'}>
-              {isConnected ? 'Live' : 'Disconnected'}
+              {isConnected ? dict.dashboard.live : dict.dashboard.disconnected}
             </span>
           </div>
         </div>
@@ -71,17 +73,17 @@ export default function Dashboard() {
         </div>
       ) : error ? (
         <div className="text-center py-20">
-          <div className="text-red-400 mb-2">⚠ Failed to load value bets</div>
+          <div className="text-red-400 mb-2">⚠ {dict.dashboard.failedToLoad}</div>
           <p className="text-gray-500 text-sm mb-4">{error}</p>
           <Button variant="secondary" onClick={() => refetch(filters)}>
-            Try Again
+            {dict.dashboard.tryAgain}
           </Button>
         </div>
       ) : filteredBets.length === 0 ? (
         <div className="text-center py-20">
           <div className="text-5xl mb-4">🔍</div>
-          <h3 className="text-lg font-semibold text-gray-300 mb-2">No value bets found</h3>
-          <p className="text-gray-500 text-sm">Try adjusting your filters or check back later.</p>
+          <h3 className="text-lg font-semibold text-gray-300 mb-2">{dict.dashboard.noValueBets}</h3>
+          <p className="text-gray-500 text-sm">{dict.dashboard.noValueBetsHint}</p>
         </div>
       ) : (
         <>
@@ -100,10 +102,10 @@ export default function Dashboard() {
                 disabled={currentPage <= 1}
                 onClick={() => handlePageChange(currentPage - 1)}
               >
-                ← Prev
+                ← {dict.dashboard.prev}
               </Button>
               <span className="text-sm text-gray-400 px-3">
-                Page {currentPage} of {totalPages}
+                {dict.dashboard.page} {currentPage} {dict.dashboard.of} {totalPages}
               </span>
               <Button
                 variant="secondary"
@@ -111,7 +113,7 @@ export default function Dashboard() {
                 disabled={currentPage >= totalPages}
                 onClick={() => handlePageChange(currentPage + 1)}
               >
-                Next →
+                {dict.dashboard.next} →
               </Button>
             </div>
           )}

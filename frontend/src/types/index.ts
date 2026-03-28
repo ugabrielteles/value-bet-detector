@@ -334,3 +334,55 @@ export interface SimulationChartPoint {
   stake: number
   won: boolean
 }
+
+// Data ingestion
+export type IngestionProcessType = 'fixtures' | 'odds'
+export type IngestionTriggerType = 'manual' | 'cron'
+export type IngestionRunStatus = 'success' | 'partial' | 'failed'
+
+export interface IngestionLog {
+  _id: string
+  processType: IngestionProcessType
+  trigger: IngestionTriggerType
+  status: IngestionRunStatus
+  date: string
+  leagueId: string
+  fixturesFetched: number
+  matchesUpserted: number
+  oddsSaved: number
+  fixturesWithNoOdds: number
+  fallbackUsed: boolean
+  fallbackDate?: string
+  errorList: string[]
+  errorMessage?: string
+  startedAt: string
+  finishedAt: string
+  durationMs: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface IngestionLogFilters {
+  limit?: number
+  processType?: IngestionProcessType | 'all'
+  trigger?: IngestionTriggerType | 'all'
+  status?: IngestionRunStatus | 'all'
+  fallbackUsed?: 'true' | 'false' | 'all'
+}
+
+export interface RunIngestionParams {
+  leagueId?: string
+  date?: string
+}
+
+export interface IngestionSummary {
+  date: string
+  leagueId: string
+  fixturesFetched: number
+  matchesUpserted: number
+  oddsSaved: number
+  fixturesWithNoOdds: number
+  fallbackUsed: boolean
+  fallbackDate?: string
+  errors: string[]
+}

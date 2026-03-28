@@ -78,14 +78,14 @@ export default function Analytics() {
 
   if (error || !summary) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-20 text-center">
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
         <p className="text-red-400">{error ?? 'No analytics data available'}</p>
       </div>
     )
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-white">Analytics</h1>
         <p className="text-gray-400 text-sm mt-1">Performance overview and statistics</p>

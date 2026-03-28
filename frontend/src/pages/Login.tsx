@@ -3,23 +3,24 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import { useI18n } from '../hooks/useI18n'
 
 export default function Login() {
   const navigate = useNavigate()
   const login = useAuthStore((s) => s.login)
   const isLoading = useAuthStore((s) => s.isLoading)
+  const { dict } = useI18n()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: FormEvent) => {
-    debugger
     e.preventDefault()
     setError(null)
 
-    if (!email) { setError('Email is required'); return }
-    if (!password) { setError('Password is required'); return }
+    if (!email) { setError(dict.login.emailRequired); return }
+    if (!password) { setError(dict.login.passwordRequired); return }
 
     try {
       await login({ email, password })
@@ -28,7 +29,7 @@ export default function Login() {
       if (err instanceof Error) {
         setError(err.message)
       } else {
-        setError('Invalid credentials. Please try again.')
+        setError(dict.login.invalidCredentials)
       }
     }
   }
@@ -38,15 +39,15 @@ export default function Login() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">⚽</div>
-          <h1 className="text-3xl font-bold text-white">ValueBet Detector</h1>
-          <p className="text-gray-400 mt-2">Sign in to your account</p>
+          <h1 className="text-3xl font-bold text-white">{dict.login.title}</h1>
+          <p className="text-gray-400 mt-2">{dict.login.subtitle}</p>
         </div>
 
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-8">
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <Input
               id="email"
-              label="Email"
+              label={dict.login.email}
               type="email"
               autoComplete="email"
               placeholder="you@example.com"
@@ -55,7 +56,7 @@ export default function Login() {
             />
             <Input
               id="password"
-              label="Password"
+              label={dict.login.password}
               type="password"
               autoComplete="current-password"
               placeholder="••••••••"
@@ -70,13 +71,13 @@ export default function Login() {
             )}
 
             <Button type="submit" variant="primary" size="lg" isLoading={isLoading} className="w-full">
-              Sign In
+              {dict.login.signIn}
             </Button>
           </form>
         </div>
 
         <p className="text-center text-gray-500 text-sm mt-6">
-          Powered by AI-driven value detection
+          {dict.login.poweredBy}
         </p>
       </div>
     </div>

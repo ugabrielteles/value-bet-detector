@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosError, AxiosInstance, AxiosResponse } from 'axios';
 import { BookmakerAdapter } from './bookmaker-adapter.interface';
 
 @Injectable()
@@ -17,13 +17,57 @@ export class ApiFootballAdapter implements BookmakerAdapter {
     });
   }
 
-  private async withRetry<T>(fn: () => Promise<T>, retries = this.maxRetries): Promise<T> {
+  private logSuccess(endpoint: string, params: Record<string, string>, response: AxiosResponse): void {
+    const results = Number(response.data?.results ?? 0);
+    const errors = response.data?.errors;
+    this.logger.log(
+      `[${endpoint}] status=${response.status} params=${JSON.stringify(params)} results=${results} errors=${JSON.stringify(errors ?? null)}`,
+    );
+  }
+
+  private ensureApiPayloadIsValid(endpoint: string, response: AxiosResponse): void {
+    const errors = response.data?.errors;
+    if (errors && typeof errors === 'object' && Object.keys(errors).length > 0) {
+      throw new Error(`[${endpoint}] ${JSON.stringify(errors)}`);
+    }
+  }
+
+  private deriveSeason(date: string): string {
+    const [yearString, monthString] = date.split('-');
+    const year = Number(yearString);
+    const month = Number(monthString);
+
+    if (!year || !month) {
+      return String(new Date().getFullYear());
+    }
+
+    return String(month >= 7 ? year : year - 1);
+  }
+
+  private logFailure(endpoint: string, params: Record<string, string>, error: unknown, attempt: number): void {
+    const axiosError = error as AxiosError<{ errors?: unknown; message?: string }>;
+    const status = axiosError.response?.status ?? 'no-status';
+    const responseErrors = axiosError.response?.data?.errors;
+    const responseMessage = axiosError.response?.data?.message;
+
+    this.logger.warn(
+      `[${endpoint}] attempt=${attempt + 1} failed status=${status} params=${JSON.stringify(params)} message=${responseMessage ?? axiosError.message} errors=${JSON.stringify(responseErrors ?? null)}`,
+    );
+  }
+
+  private async withRetry<T>(
+    endpoint: string,
+    params: Record<string, string>,
+    fn: () => Promise<T>,
+    retries = this.maxRetries,
+  ): Promise<T> {
     let lastError: Error;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         return await fn();
       } catch (error: unknown) {
         lastError = error as Error;
+        this.logFailure(endpoint, params, error, attempt);
         const axiosError = error as { response?: { status: number } };
         if (axiosError?.response?.status === 429) {
           const waitMs = Math.pow(2, attempt) * 1000;
@@ -39,22 +83,31 @@ export class ApiFootballAdapter implements BookmakerAdapter {
   }
 
   async fetchFixtures(leagueId: string, date: string): Promise<unknown[]> {
-    return this.withRetry(async () => {
-      const response = await this.client.get('/fixtures', { params: { league: leagueId, date } });
+    const params = { league: leagueId, date, season: this.deriveSeason(date) };
+    return this.withRetry('/fixtures', params, async () => {
+      const response = await this.client.get('/fixtures', { params });
+      this.ensureApiPayloadIsValid('/fixtures', response);
+      this.logSuccess('/fixtures', params, response);
       return response.data?.response ?? [];
     });
   }
 
   async fetchOdds(matchId: string): Promise<unknown[]> {
-    return this.withRetry(async () => {
-      const response = await this.client.get('/odds', { params: { fixture: matchId } });
+    const params = { fixture: matchId };
+    return this.withRetry('/odds', params, async () => {
+      const response = await this.client.get('/odds', { params });
+      this.ensureApiPayloadIsValid('/odds', response);
+      this.logSuccess('/odds', params, response);
       return response.data?.response ?? [];
     });
   }
 
   async fetchStatistics(matchId: string): Promise<unknown> {
-    return this.withRetry(async () => {
-      const response = await this.client.get('/fixtures/statistics', { params: { fixture: matchId } });
+    const params = { fixture: matchId };
+    return this.withRetry('/fixtures/statistics', params, async () => {
+      const response = await this.client.get('/fixtures/statistics', { params });
+      this.ensureApiPayloadIsValid('/fixtures/statistics', response);
+      this.logSuccess('/fixtures/statistics', params, response);
       return response.data?.response ?? {};
     });
   }

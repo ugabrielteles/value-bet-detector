@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button'
 import { Input, Select } from '../components/ui/Input'
 import { Spinner } from '../components/ui/Spinner'
 import { StatusBadge } from '../components/ui/Badge'
+import { useI18n } from '../hooks/useI18n'
 
 interface MetricCardProps { label: string; value: string; positive?: boolean; negative?: boolean }
 function MetricCard({ label, value, positive, negative }: MetricCardProps) {
@@ -44,6 +45,7 @@ export default function Simulator() {
   const [onlyHighValue, setOnlyHighValue] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const { dict } = useI18n()
 
   useEffect(() => {
     simulatorApi.getSimulations()
@@ -65,8 +67,9 @@ export default function Simulator() {
   const handleRun = async () => {
     setIsRunning(true)
     setError(null)
+    const normalizedName = name.trim() || `Simulation ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`
     const params: RunSimulationParams = {
-      name: name || undefined,
+      name: normalizedName,
       initialBankroll,
       strategy,
       flatStakeAmount: strategy === 'flat' ? flatStake : undefined,
@@ -84,7 +87,7 @@ export default function Simulator() {
       setSimulations((prev) => [sim, ...prev])
       await loadSimulation(sim)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Simulation failed')
+      setError(err instanceof Error ? err.message : dict.simulator.simulationFailed)
     } finally {
       setIsRunning(false)
     }
@@ -93,8 +96,8 @@ export default function Simulator() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Simulator</h1>
-        <p className="text-gray-400 text-sm mt-1">Backtest your strategy on historical value bets</p>
+        <h1 className="text-2xl font-bold text-white">{dict.simulator.title}</h1>
+        <p className="text-gray-400 text-sm mt-1">{dict.simulator.subtitle}</p>
       </div>
 
       <div className="flex gap-6">
@@ -102,57 +105,57 @@ export default function Simulator() {
         <div className="w-80 shrink-0 space-y-4">
           {/* Config */}
           <Card>
-            <CardHeader><h2 className="font-semibold text-white text-sm">Configuration</h2></CardHeader>
+            <CardHeader><h2 className="font-semibold text-white text-sm">{dict.simulator.configuration}</h2></CardHeader>
             <CardBody className="space-y-3">
-              <Input label="Name" placeholder="My Simulation" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input label={dict.simulator.name} placeholder={dict.simulator.mySimulation} value={name} onChange={(e) => setName(e.target.value)} />
               <Input
-                label="Initial Bankroll"
+                label={dict.simulator.initialBankroll}
                 type="number" min="100"
                 value={initialBankroll}
                 onChange={(e) => setInitialBankroll(parseFloat(e.target.value) || 0)}
               />
-              <Select label="Strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as SimulationStrategy)}>
-                <option value="flat">Flat Stake</option>
-                <option value="kelly">Kelly Criterion</option>
-                <option value="percentage">Percentage</option>
+              <Select label={dict.simulator.strategy} value={strategy} onChange={(e) => setStrategy(e.target.value as SimulationStrategy)}>
+                <option value="flat">{dict.simulator.flatStake}</option>
+                <option value="kelly">{dict.simulator.kellyCriterion}</option>
+                <option value="percentage">{dict.simulator.percentage}</option>
               </Select>
               {strategy === 'flat' && (
-                <Input label="Flat Stake" type="number" min="1" value={flatStake} onChange={(e) => setFlatStake(parseFloat(e.target.value) || 0)} />
+                <Input label={dict.simulator.flatStake} type="number" min="1" value={flatStake} onChange={(e) => setFlatStake(parseFloat(e.target.value) || 0)} />
               )}
               {strategy === 'percentage' && (
-                <Input label="Stake %" type="number" min="0.1" max="100" step="0.5" value={percentageStake} onChange={(e) => setPercentageStake(parseFloat(e.target.value) || 0)} />
+                <Input label={dict.simulator.stakePct} type="number" min="0.1" max="100" step="0.5" value={percentageStake} onChange={(e) => setPercentageStake(parseFloat(e.target.value) || 0)} />
               )}
               {strategy === 'kelly' && (
-                <Input label="Kelly Fraction" type="number" min="0.05" max="1" step="0.05" value={kellyFraction} onChange={(e) => setKellyFraction(parseFloat(e.target.value) || 0)} />
+                <Input label={dict.simulator.kellyFraction} type="number" min="0.05" max="1" step="0.05" value={kellyFraction} onChange={(e) => setKellyFraction(parseFloat(e.target.value) || 0)} />
               )}
               <div className="grid grid-cols-2 gap-2">
-                <Input label="Min Odds" type="number" step="0.1" min="1" value={minOdds} onChange={(e) => setMinOdds(parseFloat(e.target.value) || 0)} />
-                <Input label="Max Odds" type="number" step="0.5" value={maxOdds} onChange={(e) => setMaxOdds(parseFloat(e.target.value) || 0)} />
+                <Input label={dict.simulator.minOdds} type="number" step="0.1" min="1" value={minOdds} onChange={(e) => setMinOdds(parseFloat(e.target.value) || 0)} />
+                <Input label={dict.simulator.maxOdds} type="number" step="0.5" value={maxOdds} onChange={(e) => setMaxOdds(parseFloat(e.target.value) || 0)} />
               </div>
-              <Input label="Min Value %" type="number" min="0" step="1" value={minValue} onChange={(e) => setMinValue(parseFloat(e.target.value) || 0)} />
+              <Input label={dict.simulator.minValuePct} type="number" min="0" step="1" value={minValue} onChange={(e) => setMinValue(parseFloat(e.target.value) || 0)} />
               <div className="flex items-center gap-2">
                 <input type="checkbox" id="highOnly" checked={onlyHighValue} onChange={(e) => setOnlyHighValue(e.target.checked)} className="w-4 h-4 accent-blue-500" />
-                <label htmlFor="highOnly" className="text-sm text-gray-300">High Value Only</label>
+                <label htmlFor="highOnly" className="text-sm text-gray-300">{dict.simulator.highValueOnly}</label>
               </div>
-              <Input label="Date From" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-              <Input label="Date To" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              <Input label={dict.simulator.dateFrom} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              <Input label={dict.simulator.dateTo} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
 
               {error && <p className="text-xs text-red-400">{error}</p>}
 
               <Button variant="primary" className="w-full" onClick={handleRun} isLoading={isRunning}>
-                ▶ Run Simulation
+                ▶ {dict.simulator.runSimulation}
               </Button>
             </CardBody>
           </Card>
 
           {/* Previous simulations */}
           <Card>
-            <CardHeader><h2 className="font-semibold text-white text-sm">Previous Simulations</h2></CardHeader>
+            <CardHeader><h2 className="font-semibold text-white text-sm">{dict.simulator.previousSimulations}</h2></CardHeader>
             <CardBody className="p-0 max-h-72 overflow-y-auto">
               {isLoadingSims ? (
                 <div className="flex justify-center py-4"><Spinner size="sm" /></div>
               ) : simulations.length === 0 ? (
-                <p className="text-gray-500 text-sm text-center py-4">No simulations yet</p>
+                <p className="text-gray-500 text-sm text-center py-4">{dict.simulator.noSimulationsYet}</p>
               ) : (
                 simulations.map((sim) => (
                   <button
@@ -162,7 +165,7 @@ export default function Simulator() {
                   >
                     <div className="text-sm font-medium text-white truncate">{sim.name || `Sim ${sim.id.slice(0, 8)}`}</div>
                     <div className="text-xs text-gray-400 mt-0.5">
-                      {sim.totalBets} bets · ROI: {(sim.roi * 100).toFixed(1)}%
+                      {sim.totalBets} {dict.simulator.betsShort} · ROI: {(sim.roi * 100).toFixed(1)}%
                     </div>
                   </button>
                 ))
@@ -176,8 +179,8 @@ export default function Simulator() {
           {!selected ? (
             <div className="flex flex-col items-center justify-center h-64 text-center">
               <div className="text-5xl mb-4">🎲</div>
-              <h3 className="text-lg font-semibold text-gray-300">Run a simulation</h3>
-              <p className="text-gray-500 text-sm mt-2">Configure the parameters and click ▶ Run Simulation</p>
+              <h3 className="text-lg font-semibold text-gray-300">{dict.simulator.runPromptTitle}</h3>
+              <p className="text-gray-500 text-sm mt-2">{dict.simulator.runPromptHint}</p>
             </div>
           ) : (
             <>
@@ -190,30 +193,30 @@ export default function Simulator() {
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <MetricCard label="Total Bets" value={selected.totalBets.toString()} />
-                <MetricCard label="Won" value={selected.wonBets.toString()} positive />
-                <MetricCard label="Lost" value={selected.lostBets.toString()} negative />
-                <MetricCard label="Hit Rate" value={`${(selected.hitRate * 100).toFixed(1)}%`} />
+                <MetricCard label={dict.simulator.totalBets} value={selected.totalBets.toString()} />
+                <MetricCard label={dict.simulator.won} value={selected.wonBets.toString()} positive />
+                <MetricCard label={dict.simulator.lost} value={selected.lostBets.toString()} negative />
+                <MetricCard label={dict.simulator.hitRate} value={`${(selected.hitRate * 100).toFixed(1)}%`} />
                 <MetricCard
-                  label="ROI"
+                  label={dict.simulator.roi}
                   value={`${selected.roi >= 0 ? '+' : ''}${(selected.roi * 100).toFixed(1)}%`}
                   positive={selected.roi > 0}
                   negative={selected.roi < 0}
                 />
                 <MetricCard
-                  label="Total Profit"
+                  label={dict.simulator.totalProfit}
                   value={`${selected.totalProfit >= 0 ? '+' : ''}${selected.totalProfit.toFixed(2)}`}
                   positive={selected.totalProfit > 0}
                   negative={selected.totalProfit < 0}
                 />
-                <MetricCard label="Final Bankroll" value={selected.currentBankroll.toFixed(2)} />
-                <MetricCard label="Max Drawdown" value={`${(selected.maxDrawdown * 100).toFixed(1)}%`} negative />
+                <MetricCard label={dict.simulator.finalBankroll} value={selected.currentBankroll.toFixed(2)} />
+                <MetricCard label={dict.simulator.maxDrawdown} value={`${(selected.maxDrawdown * 100).toFixed(1)}%`} negative />
               </div>
 
               {/* Bankroll Evolution Chart */}
               {chartData.length > 0 && (
                 <Card>
-                  <CardHeader><h3 className="font-semibold text-white">Bankroll Evolution</h3></CardHeader>
+                  <CardHeader><h3 className="font-semibold text-white">{dict.simulator.bankrollEvolution}</h3></CardHeader>
                   <CardBody>
                     <ResponsiveContainer width="100%" height={260}>
                       <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -236,19 +239,19 @@ export default function Simulator() {
               {/* Bets Table */}
               {selected.bets.length > 0 && (
                 <Card>
-                  <CardHeader><h3 className="font-semibold text-white">Bet-by-Bet Results</h3></CardHeader>
+                  <CardHeader><h3 className="font-semibold text-white">{dict.simulator.betByBetResults}</h3></CardHeader>
                   <CardBody className="p-0 max-h-80 overflow-y-auto">
                     <table className="w-full text-xs">
                       <thead className="sticky top-0 bg-gray-800">
                         <tr className="border-b border-gray-700 text-gray-400 uppercase">
                           <th className="px-4 py-2 text-left">#</th>
-                          <th className="px-4 py-2 text-left">Market</th>
-                          <th className="px-4 py-2 text-left">Outcome</th>
-                          <th className="px-4 py-2 text-right">Odds</th>
-                          <th className="px-4 py-2 text-right">Stake</th>
-                          <th className="px-4 py-2 text-right">Profit</th>
-                          <th className="px-4 py-2 text-right">Bankroll</th>
-                          <th className="px-4 py-2 text-center">Status</th>
+                          <th className="px-4 py-2 text-left">{dict.simulator.market}</th>
+                          <th className="px-4 py-2 text-left">{dict.simulator.outcome}</th>
+                          <th className="px-4 py-2 text-right">{dict.simulator.odds}</th>
+                          <th className="px-4 py-2 text-right">{dict.simulator.stake}</th>
+                          <th className="px-4 py-2 text-right">{dict.simulator.profit}</th>
+                          <th className="px-4 py-2 text-right">{dict.simulator.bankroll}</th>
+                          <th className="px-4 py-2 text-center">{dict.simulator.status}</th>
                         </tr>
                       </thead>
                       <tbody>

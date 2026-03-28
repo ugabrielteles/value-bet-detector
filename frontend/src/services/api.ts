@@ -25,6 +25,10 @@ import type {
   Simulation,
   SimulationChartPoint,
   BetStatus,
+  IngestionLog,
+  IngestionLogFilters,
+  RunIngestionParams,
+  IngestionSummary,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
@@ -52,6 +56,17 @@ type BackendValueBet = {
   resolvedAt?: string
 }
 
+type BackendSimulation = Partial<Simulation> & {
+  id: string
+  userId: string
+  bets?: Simulation['bets']
+}
+
+type BackendBankroll = Partial<Bankroll> & {
+  id?: string
+  userId?: string
+}
+
 function normalizeValueBet(bet: BackendValueBet): ValueBet {
   const valueScore = bet.valueScore ?? bet.value ?? 0
   const valueCategory = bet.valueCategory ?? bet.classification ?? ValueCategory.LOW
@@ -61,6 +76,90 @@ function normalizeValueBet(bet: BackendValueBet): ValueBet {
     market: bet.market as ValueBet['market'],
     valueScore,
     valueCategory,
+  }
+}
+
+function normalizeSimulation(sim: BackendSimulation): Simulation {
+  const bets = sim.bets ?? []
+  const totalBets = bets.length
+  const wonBets = bets.filter((b) => b.status === 'won').length
+  const lostBets = bets.filter((b) => b.status === 'lost').length
+  const totalStaked = bets.reduce((acc, b) => acc + (b.stake ?? 0), 0)
+  const totalProfit = bets.reduce((acc, b) => acc + (b.profit ?? 0), 0)
+  const settledCount = bets.filter((b) => b.status !== 'void').length
+
+  let peak = sim.initialBankroll ?? 0
+  let maxDrawdown = 0
+  for (const bet of bets) {
+    const bankrollAfter = bet.bankrollAfter ?? 0
+    if (bankrollAfter > peak) peak = bankrollAfter
+    if (peak > 0) {
+      const drawdown = (peak - bankrollAfter) / peak
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown
+    }
+  }
+
+  return {
+    id: sim.id,
+    userId: sim.userId,
+    name: sim.name ?? '',
+    initialBankroll: sim.initialBankroll ?? 0,
+    currentBankroll: sim.currentBankroll ?? sim.initialBankroll ?? 0,
+    strategy: sim.strategy ?? 'flat',
+    flatStakeAmount: sim.flatStakeAmount ?? 0,
+    percentageStake: sim.percentageStake ?? 0,
+    kellyFraction: sim.kellyFraction ?? 0.5,
+    minOdds: sim.minOdds ?? 0,
+    maxOdds: sim.maxOdds ?? 0,
+    minValue: sim.minValue ?? 0,
+    onlyHighValue: sim.onlyHighValue ?? false,
+    dateFrom: sim.dateFrom ?? '',
+    dateTo: sim.dateTo ?? '',
+    status: sim.status ?? 'pending',
+    bets,
+    totalBets,
+    wonBets,
+    lostBets,
+    totalStaked,
+    totalProfit,
+    roi: totalStaked > 0 ? totalProfit / totalStaked : 0,
+    hitRate: settledCount > 0 ? wonBets / settledCount : 0,
+    maxDrawdown,
+    createdAt: sim.createdAt ?? new Date().toISOString(),
+  }
+}
+
+function normalizeBankroll(bankroll: BackendBankroll): Bankroll {
+  const initialBankroll = bankroll.initialBankroll ?? 1000
+  const currentBankroll = bankroll.currentBankroll ?? initialBankroll
+  const profitLoss = currentBankroll - initialBankroll
+  const roi = initialBankroll > 0 ? profitLoss / initialBankroll : 0
+  const stopLossEnabled = bankroll.stopLossEnabled ?? false
+  const stopLossPercentage = bankroll.stopLossPercentage ?? 20
+  const isStopped =
+    stopLossEnabled &&
+    initialBankroll > 0 &&
+    (initialBankroll - currentBankroll) / initialBankroll >= stopLossPercentage / 100
+
+  return {
+    id: bankroll.id ?? '',
+    userId: bankroll.userId ?? '',
+    initialBankroll,
+    currentBankroll,
+    minBetPercentage: bankroll.minBetPercentage ?? 1,
+    maxBetPercentage: bankroll.maxBetPercentage ?? 5,
+    strategy: bankroll.strategy ?? 'kelly',
+    useKellyCriterion: bankroll.useKellyCriterion ?? true,
+    kellyFraction: bankroll.kellyFraction ?? 0.5,
+    stopLossEnabled,
+    stopLossPercentage,
+    currency: bankroll.currency ?? 'USD',
+    isActive: bankroll.isActive ?? true,
+    profitLoss,
+    roi,
+    isStopped,
+    createdAt: bankroll.createdAt ?? new Date().toISOString(),
+    updatedAt: bankroll.updatedAt ?? new Date().toISOString(),
   }
 }
 
@@ -230,10 +329,10 @@ export const resolveValueBet = (id: string, status: BetStatus, stakeAmount?: num
 
 // Bankroll API
 export const bankrollApi = {
-  getBankroll: () => api.get<Bankroll>('/bankroll').then((r) => r.data),
+  getBankroll: () => api.get<BackendBankroll>('/bankroll').then((r) => normalizeBankroll(r.data)),
 
   updateBankroll: (data: UpdateBankrollData) =>
-    api.put<Bankroll>('/bankroll', data).then((r) => r.data),
+    api.put<BackendBankroll>('/bankroll', data).then((r) => normalizeBankroll(r.data)),
 
   getStakeRecommendation: (modelProbability: number, decimalOdds: number) =>
     api
@@ -262,12 +361,36 @@ export const analyticsApi = {
 // Simulator API
 export const simulatorApi = {
   runSimulation: (params: RunSimulationParams) =>
-    api.post<Simulation>('/simulator/run', params).then((r) => r.data),
+    api.post<BackendSimulation>('/simulator/run', params).then((r) => normalizeSimulation(r.data)),
 
-  getSimulations: () => api.get<Simulation[]>('/simulator').then((r) => r.data),
+  getSimulations: () =>
+    api.get<BackendSimulation[]>('/simulator').then((r) => r.data.map((sim) => normalizeSimulation(sim))),
 
-  getSimulation: (id: string) => api.get<Simulation>(`/simulator/${id}`).then((r) => r.data),
+  getSimulation: (id: string) =>
+    api.get<BackendSimulation>(`/simulator/${id}`).then((r) => normalizeSimulation(r.data)),
 
   getSimulationChart: (id: string) =>
     api.get<SimulationChartPoint[]>(`/simulator/${id}/chart`).then((r) => r.data),
+}
+
+// Data ingestion API
+export const dataIngestionApi = {
+  getLogs: (filters?: IngestionLogFilters) =>
+    api
+      .get<IngestionLog[]>('/data-ingestion/logs', {
+        params: {
+          limit: filters?.limit,
+          processType: filters?.processType && filters.processType !== 'all' ? filters.processType : undefined,
+          trigger: filters?.trigger && filters.trigger !== 'all' ? filters.trigger : undefined,
+          status: filters?.status && filters.status !== 'all' ? filters.status : undefined,
+          fallbackUsed: filters?.fallbackUsed && filters.fallbackUsed !== 'all' ? filters.fallbackUsed : undefined,
+        },
+      })
+      .then((r) => r.data),
+
+  runFixtureSync: (params?: RunIngestionParams) =>
+    api.post<IngestionSummary>('/data-ingestion/run-fixtures', undefined, { params }).then((r) => r.data),
+
+  runOddsIngestion: (params?: RunIngestionParams) =>
+    api.post<IngestionSummary>('/data-ingestion/run-odds', undefined, { params }).then((r) => r.data),
 }

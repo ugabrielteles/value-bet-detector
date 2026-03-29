@@ -14,6 +14,15 @@ export class BankrollEntity {
   stopLossPercentage: number;
   currency: string;
   isActive: boolean;
+
+  // Auto-bet settings
+  autoBetEnabled: boolean;
+  autoBetProvider: string | null; // e.g. 'betano'
+  autoBetMinValue: number;        // minimum value edge % to trigger auto-bet
+  autoBetMinClassification: 'LOW' | 'MEDIUM' | 'HIGH';
+  autoBetMaxDailyBets: number;
+  autoBetDryRun: boolean;         // false = real bets
+
   createdAt: Date;
   updatedAt: Date;
 
@@ -27,6 +36,13 @@ export class BankrollEntity {
     this.stopLossPercentage = 20;
     this.currency = 'USD';
     this.isActive = true;
+    // Auto-bet defaults (safe off)
+    this.autoBetEnabled = false;
+    this.autoBetProvider = null;
+    this.autoBetMinValue = 5;
+    this.autoBetMinClassification = 'MEDIUM';
+    this.autoBetMaxDailyBets = 10;
+    this.autoBetDryRun = true;
     if (partial) Object.assign(this, partial);
   }
 

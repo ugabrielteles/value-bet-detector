@@ -35,6 +35,16 @@ import type {
   IngestionLogFilters,
   RunIngestionParams,
   IngestionSummary,
+  BookmakerProvider,
+  BookmakerCredentialsSafeView,
+  UpsertBookmakerCredentialsData,
+  AutomationProviderStatus,
+  RunBookmakerAutomationParams,
+  AutomationRunResult,
+  AutoBet,
+  AutoBetStatus,
+  AutoBetsAnalytics,
+  UpdateAutoBetOutcome,
 } from '../types'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
@@ -710,6 +720,10 @@ export const simulatorApi = {
             market: String(pickFirst(sources, ['market']) ?? ''),
             outcome: String(pickFirst(sources, ['outcome', 'selection']) ?? ''),
             bookmaker: String(pickFirst(sources, ['bookmaker']) ?? ''),
+            bookmakerUrl: (() => {
+              const url = pickFirst(sources, ['bookmakerUrl', 'bookmaker_url'])
+              return typeof url === 'string' ? url : undefined
+            })(),
             odds: toNumber(pickFirst(sources, ['odds', 'bookmakerOdds', 'bookmaker_odds', 'decimalOdds'])),
             modelProbability: toNumber(pickFirst(sources, ['modelProbability', 'model_probability', 'probability'])),
             value: toNumber(pickFirst(sources, ['value', 'valueScore', 'value_score'])),
@@ -761,4 +775,48 @@ export const dataIngestionApi = {
         params: date ? { date } : undefined,
       })
       .then((r) => r.data),
+}
+
+export const bookmakerCredentialsApi = {
+  getProviders: () =>
+    api.get<BookmakerProvider[]>('/bookmaker-credentials/providers').then((r) => r.data),
+
+  list: () =>
+    api.get<BookmakerCredentialsSafeView[]>('/bookmaker-credentials').then((r) => r.data),
+
+  upsert: (data: UpsertBookmakerCredentialsData) =>
+    api.post<BookmakerCredentialsSafeView>('/bookmaker-credentials', data).then((r) => r.data),
+
+  remove: (id: string) =>
+    api.delete<{ ok: boolean }>(`/bookmaker-credentials/${id}`).then((r) => r.data),
+}
+
+export const betAutomationApi = {
+  getProvidersStatus: () =>
+    api.get<AutomationProviderStatus[]>('/bet-automation/providers').then((r) => r.data),
+
+  run: (params: RunBookmakerAutomationParams) =>
+    api.post<AutomationRunResult>('/bet-automation/run', params).then((r) => r.data),
+}
+
+export const autoBetsApi = {
+  list: (params?: { status?: AutoBetStatus; page?: number; limit?: number }) =>
+    api
+      .get<{ data: AutoBet[]; total: number }>('/auto-bets', { params })
+      .then((r) => r.data),
+
+  getAnalytics: () =>
+    api.get<AutoBetsAnalytics>('/auto-bets/analytics').then((r) => r.data),
+
+  executeAll: () =>
+    api.post<{ executed: number; failed: number }>('/auto-bets/execute-all').then((r) => r.data),
+
+  execute: (id: string) =>
+    api.post<AutoBet>(`/auto-bets/${id}/execute`).then((r) => r.data),
+
+  cancel: (id: string) =>
+    api.patch<AutoBet>(`/auto-bets/${id}/cancel`).then((r) => r.data),
+
+  updateOutcome: (id: string, data: UpdateAutoBetOutcome) =>
+    api.patch<AutoBet>(`/auto-bets/${id}/outcome`, data).then((r) => r.data),
 }

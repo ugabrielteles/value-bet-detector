@@ -9,6 +9,6 @@ import { ValueBet, ValueBetSchema } from './infrastructure/models/value-bet.mode
   imports: [MongooseModule.forFeature([{ name: ValueBet.name, schema: ValueBetSchema }])],
   controllers: [ValueBetsController],
   providers: [ValueBetsService, ValueBetsRepository],
-  exports: [ValueBetsService],
+  exports: [ValueBetsService, ValueBetsRepository],
 })
 export class ValueBetsModule {}

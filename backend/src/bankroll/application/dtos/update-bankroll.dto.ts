@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, IsBoolean, Min, Max } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsBoolean, IsString, Min, Max } from 'class-validator';
 
 export class UpdateBankrollDto {
   @IsOptional()
@@ -49,4 +49,31 @@ export class UpdateBankrollDto {
 
   @IsOptional()
   currency?: string;
+
+  // Auto-bet settings
+  @IsOptional()
+  @IsBoolean()
+  autoBetEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  autoBetProvider?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  autoBetMinValue?: number;
+
+  @IsOptional()
+  @IsEnum(['LOW', 'MEDIUM', 'HIGH'])
+  autoBetMinClassification?: 'LOW' | 'MEDIUM' | 'HIGH';
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  autoBetMaxDailyBets?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  autoBetDryRun?: boolean;
 }

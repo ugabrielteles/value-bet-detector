@@ -14,6 +14,9 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { BankrollModule } from './bankroll/bankroll.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SimulatorModule } from './simulator/simulator.module';
+import { BookmakerCredentialsModule } from './bookmaker-credentials/bookmaker-credentials.module';
+import { BetAutomationModule } from './bet-automation/bet-automation.module';
+import { AutoBetsModule } from './auto-bets/auto-bets.module';
 
 @Module({
   imports: [
@@ -32,6 +35,9 @@ import { SimulatorModule } from './simulator/simulator.module';
     BankrollModule,
     AnalyticsModule,
     SimulatorModule,
+    BookmakerCredentialsModule,
+    BetAutomationModule,
+    AutoBetsModule,
   ],
 })
 export class AppModule {}

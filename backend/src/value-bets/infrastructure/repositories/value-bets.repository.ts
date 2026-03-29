@@ -80,4 +80,12 @@ export class ValueBetsRepository {
     const docs = await this.valueBetModel.find().exec();
     return docs.map((d) => this.toEntity(d));
   }
+
+  async findSince(since: Date): Promise<ValueBetEntity[]> {
+    const docs = await this.valueBetModel
+      .find({ createdAt: { $gte: since }, isActive: true, status: 'pending' })
+      .sort({ createdAt: 1 })
+      .exec();
+    return docs.map((d) => this.toEntity(d));
+  }
 }

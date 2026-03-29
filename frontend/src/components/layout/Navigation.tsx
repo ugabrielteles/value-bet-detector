@@ -13,6 +13,8 @@ const navItems = [
   { to: '/data-ingestion', key: 'ingestion', adminOnly: false },
   { to: '/simulator', key: 'simulator', adminOnly: false },
   { to: '/bankroll', key: 'bankroll', adminOnly: false },
+  { to: '/automation', key: 'automation', adminOnly: false },
+  { to: '/auto-bets', key: 'autoBets', adminOnly: false },
   { to: '/admin/predictions', key: 'adminPredictions', adminOnly: true },
 ] as const
 

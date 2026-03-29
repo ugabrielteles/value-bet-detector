@@ -40,6 +40,25 @@ export class Bankroll {
 
   @Prop({ default: true })
   isActive: boolean;
+
+  // Auto-bet settings
+  @Prop({ default: false })
+  autoBetEnabled: boolean;
+
+  @Prop({ default: null })
+  autoBetProvider: string;
+
+  @Prop({ default: 5 })
+  autoBetMinValue: number;
+
+  @Prop({ enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'MEDIUM' })
+  autoBetMinClassification: string;
+
+  @Prop({ default: 10 })
+  autoBetMaxDailyBets: number;
+
+  @Prop({ default: true })
+  autoBetDryRun: boolean;
 }
 
 export const BankrollSchema = SchemaFactory.createForClass(Bankroll);

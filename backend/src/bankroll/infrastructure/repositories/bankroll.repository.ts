@@ -26,6 +26,12 @@ export class BankrollRepository {
       stopLossPercentage: doc.stopLossPercentage,
       currency: doc.currency,
       isActive: doc.isActive,
+      autoBetEnabled: (doc as any).autoBetEnabled ?? false,
+      autoBetProvider: (doc as any).autoBetProvider ?? null,
+      autoBetMinValue: (doc as any).autoBetMinValue ?? 5,
+      autoBetMinClassification: (doc as any).autoBetMinClassification ?? 'MEDIUM',
+      autoBetMaxDailyBets: (doc as any).autoBetMaxDailyBets ?? 10,
+      autoBetDryRun: (doc as any).autoBetDryRun !== false,
       createdAt: (doc as unknown as { createdAt: Date }).createdAt,
       updatedAt: (doc as unknown as { updatedAt: Date }).updatedAt,
     });
@@ -43,5 +49,10 @@ export class BankrollRepository {
       { new: true, upsert: true },
     ).exec();
     return this.toEntity(doc);
+  }
+
+  async findUserIdsWithAutoBetEnabled(): Promise<string[]> {
+    const docs = await this.bankrollModel.find({ autoBetEnabled: true }, 'userId').exec();
+    return docs.map((d) => d.userId);
   }
 }

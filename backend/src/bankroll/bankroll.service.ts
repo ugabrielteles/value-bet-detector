@@ -39,6 +39,10 @@ export class BankrollService {
     return this.bankrollRepository.upsert(userId, { currentBankroll: newBankroll });
   }
 
+  async getUsersWithAutoBetEnabled(): Promise<string[]> {
+    return this.bankrollRepository.findUserIdsWithAutoBetEnabled();
+  }
+
   calculateKellyStake(bankroll: BankrollEntity, modelProbability: number, decimalOdds: number): number {
     const b = decimalOdds - 1;
     const p = modelProbability;

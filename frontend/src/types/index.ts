@@ -299,6 +299,13 @@ export interface Bankroll {
   profitLoss: number
   roi: number
   isStopped: boolean
+  // Auto-bet settings
+  autoBetEnabled?: boolean
+  autoBetProvider?: string | null
+  autoBetMinValue?: number
+  autoBetMinClassification?: 'LOW' | 'MEDIUM' | 'HIGH'
+  autoBetMaxDailyBets?: number
+  autoBetDryRun?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -313,6 +320,13 @@ export interface UpdateBankrollData {
   stopLossEnabled: boolean
   stopLossPercentage: number
   currency?: string
+  // Auto-bet settings
+  autoBetEnabled?: boolean
+  autoBetProvider?: string | null
+  autoBetMinValue?: number
+  autoBetMinClassification?: 'LOW' | 'MEDIUM' | 'HIGH'
+  autoBetMaxDailyBets?: number
+  autoBetDryRun?: boolean
 }
 
 export interface StakeRecommendation {
@@ -501,4 +515,156 @@ export interface IngestionSummary {
   fallbackUsed: boolean
   fallbackDate?: string
   errors: string[]
+}
+
+export type BookmakerProvider = 'betano' | 'bet365' | 'betfair' | 'bwin' | 'unibet' | 'other'
+
+export interface BookmakerCredentialsSafeView {
+  id: string
+  provider: BookmakerProvider
+  accountLabel?: string
+  loginUrl?: string
+  hasUsername: boolean
+  hasPassword: boolean
+  hasTwoFactorSecret: boolean
+  updatedAt: string
+  createdAt: string
+}
+
+export interface UpsertBookmakerCredentialsData {
+  provider: BookmakerProvider
+  accountLabel?: string
+  loginUrl?: string
+  username?: string
+  password?: string
+  twoFactorSecret?: string
+}
+
+export interface AutomationProviderStatus {
+  provider: BookmakerProvider
+  label: string
+  automationAvailable: boolean
+  isConfigured: boolean
+  hasCredentials: boolean
+}
+
+export interface RunBookmakerAutomationParams {
+  provider: BookmakerProvider
+  eventUrl: string
+  selectionText: string
+  stake: number
+  dryRun?: boolean
+  confirmRealBet?: boolean
+}
+
+export interface AutomationRunResult {
+  ok: boolean
+  provider: BookmakerProvider
+  dryRun?: boolean
+  canPlaceRealBet?: boolean
+  realBetPlaced?: boolean
+  reason?: string
+  steps?: string[]
+}
+
+// ---- Auto-Bets ----
+
+export type AutoBetStatus =
+  | 'queued'
+  | 'placing'
+  | 'placed'
+  | 'won'
+  | 'lost'
+  | 'void'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled'
+  | 'all'
+
+export interface AutoBet {
+  id: string
+  userId: string
+  valueBetId: string
+  matchId: string
+  bookmaker: string
+  bookmakerUrl?: string
+  market: string
+  outcome: string
+  bookmakerOdds: number
+  modelProbability: number
+  valueEdge: number
+  stakeAmount: number
+  stakeStrategy: string
+  bankrollAtBet: number
+  status: Exclude<AutoBetStatus, 'all'>
+  placedAt?: string
+  betSlipId?: string
+  automationLog: string[]
+  automationError?: string
+  actualProfit?: number
+  resolvedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AutoBetsAnalytics {
+  totalAutoBets: number
+  queued: number
+  placing: number
+  placed: number
+  won: number
+  lost: number
+  failed: number
+  skipped: number
+  cancelled: number
+  void: number
+  winRate: number
+  roi: number
+  totalStaked: number
+  totalProfit: number
+  avgStake: number
+  bankrollCurrent: number
+  bankrollImpact: number
+  stopLossTriggered: boolean
+  byBookmaker: Array<{
+    bookmaker: string
+    totalBets: number
+    won: number
+    winRate: number
+    totalStaked: number
+    totalProfit: number
+    roi: number
+  }>
+  byMarket: Array<{
+    market: string
+    totalBets: number
+    won: number
+    winRate: number
+    totalStaked: number
+    totalProfit: number
+    roi: number
+  }>
+  dailyPnl: Array<{
+    date: string
+    bets: number
+    staked: number
+    profit: number
+    cumulativeProfit: number
+  }>
+}
+
+export interface UpdateAutoBetOutcome {
+  outcome: 'won' | 'lost' | 'void'
+  winnings?: number
+  betSlipId?: string
+}
+
+// Bankroll extended with auto-bet settings
+export interface BankrollAutoBetSettings {
+  autoBetEnabled: boolean
+  autoBetProvider: string | null
+  autoBetMinValue: number
+  autoBetMinClassification: 'LOW' | 'MEDIUM' | 'HIGH'
+  autoBetMaxDailyBets: number
+  autoBetDryRun: boolean
 }

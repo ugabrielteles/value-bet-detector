@@ -14,6 +14,8 @@ import Simulator from './pages/Simulator'
 import DataIngestion from './pages/DataIngestion'
 import LiveOpportunities from './pages/LiveOpportunities'
 import AdminPredictions from './pages/AdminPredictions'
+import AutomationSettings from './pages/AutomationSettings'
+import AutoBets from './pages/AutoBets'
 
 function ProtectedRoute() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -62,6 +64,8 @@ function AppRoutes() {
         <Route path="/data-ingestion" element={<DataIngestion />} />
         <Route path="/simulator" element={<Simulator />} />
         <Route path="/bankroll" element={<BankrollSettings />} />
+        <Route path="/automation" element={<AutomationSettings />} />
+        <Route path="/auto-bets" element={<AutoBets />} />
         <Route element={<AdminRoute />}>
           <Route path="/admin/predictions" element={<AdminPredictions />} />
         </Route>

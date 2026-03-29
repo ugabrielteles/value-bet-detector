@@ -16,6 +16,8 @@ export const translations = {
       ingestion: 'Ingestao',
       simulator: 'Simulador',
       bankroll: 'Bankroll',
+      automation: 'Automacao',
+      autoBets: 'Apostas Auto',
       adminPredictions: 'Admin Predicoes',
     },
     header: {
@@ -286,6 +288,8 @@ export const translations = {
       ingestion: 'Ingestion',
       simulator: 'Simulador',
       bankroll: 'Bankroll',
+      automation: 'Automatizacion',
+      autoBets: 'Apuestas Auto',
       adminPredictions: 'Admin Predicciones',
     },
     header: {
@@ -555,6 +559,8 @@ export const translations = {
       ingestion: 'Ingestion',
       simulator: 'Simulator',
       bankroll: 'Bankroll',
+      automation: 'Automation',
+      autoBets: 'Auto Bets',
       adminPredictions: 'Admin Predictions',
     },
     header: {

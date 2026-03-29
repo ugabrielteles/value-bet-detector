@@ -35,6 +35,10 @@ export class Match {
       awayXG: Number,
       homeShots: Number,
       awayShots: Number,
+      homeShotsOnTarget: Number,
+      awayShotsOnTarget: Number,
+      homeCorners: Number,
+      awayCorners: Number,
       homePossession: Number,
       awayPossession: Number,
       homeForm: [String],
@@ -46,6 +50,10 @@ export class Match {
     awayXG?: number;
     homeShots?: number;
     awayShots?: number;
+    homeShotsOnTarget?: number;
+    awayShotsOnTarget?: number;
+    homeCorners?: number;
+    awayCorners?: number;
     homePossession?: number;
     awayPossession?: number;
     homeForm?: string[];

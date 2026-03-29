@@ -12,7 +12,7 @@ export class SimulationBetEntity {
   value: number;
   classification: string;
   stake: number;
-  status: 'won' | 'lost' | 'void';
+  status: 'pending' | 'won' | 'lost' | 'void';
   profit: number;
   bankrollAfter: number;
 }
@@ -31,6 +31,7 @@ export class SimulationEntity {
   maxOdds?: number;
   minValue?: number;
   onlyHighValue?: boolean;
+  projectPending?: boolean;
   dateFrom?: Date;
   dateTo?: Date;
   status: SimulationStatus;

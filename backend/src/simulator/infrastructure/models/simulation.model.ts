@@ -57,6 +57,9 @@ export class Simulation {
   @Prop({ default: false })
   onlyHighValue: boolean;
 
+  @Prop({ default: false })
+  projectPending: boolean;
+
   @Prop()
   dateFrom: Date;
 

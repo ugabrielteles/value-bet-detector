@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { matchesApi, oddsApi, predictionsApi, valueBetsApi } from '../services/api'
-import type { Match, OddsHistory, PredictionResult, ValueBet } from '../types'
+import type { Match, MatchPredictionInsights, OddsHistory, PredictionResult, ValueBet } from '../types'
 import { Spinner } from '../components/ui/Spinner'
 import { Card, CardHeader, CardBody } from '../components/ui/Card'
 import { MatchStats } from '../components/matches/MatchStats'
@@ -9,12 +9,15 @@ import { ProbabilityBar } from '../components/matches/ProbabilityBar'
 import { OddsEvolutionChart } from '../components/charts/OddsEvolutionChart'
 import { ProbabilityComparisonChart } from '../components/charts/ProbabilityComparisonChart'
 import { CategoryBadge, StatusBadge } from '../components/ui/Badge'
+import { useI18n } from '../hooks/useI18n'
 
 export default function MatchDetail() {
+  const { dict } = useI18n()
   const { id } = useParams<{ id: string }>()
   const [match, setMatch] = useState<Match | null>(null)
   const [oddsHistory, setOddsHistory] = useState<OddsHistory[]>([])
   const [prediction, setPrediction] = useState<PredictionResult | null>(null)
+  const [insights, setInsights] = useState<MatchPredictionInsights | null>(null)
   const [valueBets, setValueBets] = useState<ValueBet[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -26,12 +29,14 @@ export default function MatchDetail() {
       matchesApi.getMatch(id),
       oddsApi.getOddsHistory(id).catch(() => [] as OddsHistory[]),
       predictionsApi.getPrediction(id).catch(() => null),
+      predictionsApi.getMatchOpportunities(id).catch(() => null),
       valueBetsApi.getValueBets({ page: 1, limit: 50 }).then((r) => r.data.filter((b) => b.matchId === id)).catch(() => []),
     ])
-      .then(([matchData, history, pred, bets]) => {
+      .then(([matchData, history, pred, matchInsights, bets]) => {
         setMatch(matchData)
         setOddsHistory(history)
         setPrediction(pred)
+        setInsights(matchInsights)
         setValueBets(bets)
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load match'))
@@ -49,10 +54,10 @@ export default function MatchDetail() {
   if (error || !match) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-20 text-center">
-        <p className="text-red-400 mb-2">Failed to load match details</p>
+        <p className="text-red-400 mb-2">{dict.matchDetail.failedToLoadMatch}</p>
         <p className="text-gray-500 text-sm">{error}</p>
         <Link to="/dashboard" className="text-blue-400 hover:underline mt-4 block">
-          ← Back to Dashboard
+          {dict.matchDetail.backToDashboard}
         </Link>
       </div>
     )
@@ -71,7 +76,7 @@ export default function MatchDetail() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       {/* Back */}
       <Link to="/dashboard" className="text-sm text-gray-400 hover:text-white flex items-center gap-1">
-        ← Back to Dashboard
+        {dict.matchDetail.backToDashboard}
       </Link>
 
       {/* Match Header */}
@@ -131,7 +136,7 @@ export default function MatchDetail() {
       {prediction && prediction.predictions.length > 0 && (
         <Card>
           <CardHeader>
-            <h2 className="font-semibold text-white">Model Predictions</h2>
+            <h2 className="font-semibold text-white">{dict.matchDetail.modelPredictions}</h2>
           </CardHeader>
           <CardBody className="space-y-3">
             {prediction.predictions.map((p) => (
@@ -141,11 +146,72 @@ export default function MatchDetail() {
         </Card>
       )}
 
+      {insights && (
+        <Card>
+          <CardHeader>
+            <h2 className="font-semibold text-white">{dict.matchDetail.advancedPredictionOpportunities}</h2>
+          </CardHeader>
+          <CardBody className="space-y-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div className="bg-gray-700/30 rounded-lg p-3">
+                <div className="text-gray-400">{dict.matchDetail.projectedGoals}</div>
+                <div className="text-white font-semibold">{insights.projectedTotals.goals.toFixed(2)}</div>
+              </div>
+              <div className="bg-gray-700/30 rounded-lg p-3">
+                <div className="text-gray-400">{dict.matchDetail.projectedShots}</div>
+                <div className="text-white font-semibold">{insights.projectedTotals.shots.toFixed(1)}</div>
+              </div>
+              <div className="bg-gray-700/30 rounded-lg p-3">
+                <div className="text-gray-400">{dict.matchDetail.projectedShotsOnTarget}</div>
+                <div className="text-white font-semibold">{insights.projectedTotals.shotsOnTarget.toFixed(1)}</div>
+              </div>
+              <div className="bg-gray-700/30 rounded-lg p-3">
+                <div className="text-gray-400">{dict.matchDetail.projectedCorners}</div>
+                <div className="text-white font-semibold">{insights.projectedTotals.corners.toFixed(1)}</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-gray-700/20 rounded-lg p-3">
+                <div className="text-xs uppercase text-gray-400 mb-1">{dict.matchDetail.homeWinProb}</div>
+                <div className="text-lg font-semibold text-white">{(insights.winProbabilities.home * 100).toFixed(1)}%</div>
+              </div>
+              <div className="bg-gray-700/20 rounded-lg p-3">
+                <div className="text-xs uppercase text-gray-400 mb-1">{dict.matchDetail.drawProb}</div>
+                <div className="text-lg font-semibold text-white">{(insights.winProbabilities.draw * 100).toFixed(1)}%</div>
+              </div>
+              <div className="bg-gray-700/20 rounded-lg p-3">
+                <div className="text-xs uppercase text-gray-400 mb-1">{dict.matchDetail.awayWinProb}</div>
+                <div className="text-lg font-semibold text-white">{(insights.winProbabilities.away * 100).toFixed(1)}%</div>
+              </div>
+            </div>
+
+            {insights.opportunities.length > 0 ? (
+              <div className="space-y-2">
+                {insights.opportunities.map((opportunity, idx) => (
+                  <div key={`${opportunity.market}-${opportunity.selection}-${idx}`} className="rounded-lg border border-gray-700 bg-gray-700/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-white font-medium">{opportunity.market}: {opportunity.selection}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{opportunity.phase === 'live' ? dict.matchDetail.live : opportunity.phase === 'pre-match' ? dict.matchDetail.preMatch : opportunity.phase === 'finished' ? dict.matchDetail.finished : dict.matchDetail.cancelled} | {dict.matchDetail.confidence} {(opportunity.confidence * 100).toFixed(1)}%{opportunity.valueEdge !== undefined ? ` | ${dict.matchDetail.edge} ${(opportunity.valueEdge * 100).toFixed(1)}%` : ''}</div>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-300 mt-2">{opportunity.rationale}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">{dict.matchDetail.noOpportunitiesYet}</p>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
       {/* Probability Comparison Chart */}
       {prediction && prediction.predictions.length > 0 && (
         <Card>
           <CardHeader>
-            <h2 className="font-semibold text-white">Model vs Implied Probability</h2>
+            <h2 className="font-semibold text-white">{dict.matchDetail.modelVsImpliedProbability}</h2>
           </CardHeader>
           <CardBody>
             <ProbabilityComparisonChart predictions={prediction.predictions} />
@@ -157,7 +223,7 @@ export default function MatchDetail() {
       {oddsHistory.length > 0 && (
         <Card>
           <CardHeader>
-            <h2 className="font-semibold text-white">Odds Evolution</h2>
+            <h2 className="font-semibold text-white">{dict.matchDetail.oddsEvolution}</h2>
           </CardHeader>
           <CardBody>
             <OddsEvolutionChart history={oddsHistory} />
@@ -169,21 +235,21 @@ export default function MatchDetail() {
       {valueBets.length > 0 && (
         <Card>
           <CardHeader>
-            <h2 className="font-semibold text-white">Value Bets for This Match</h2>
+            <h2 className="font-semibold text-white">{dict.matchDetail.valueBetsForMatch}</h2>
           </CardHeader>
           <CardBody className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-700 text-gray-400 text-xs uppercase">
-                    <th className="px-5 py-3 text-left">Market</th>
-                    <th className="px-5 py-3 text-left">Outcome</th>
-                    <th className="px-5 py-3 text-left">Bookmaker</th>
-                    <th className="px-5 py-3 text-right">Odds</th>
-                    <th className="px-5 py-3 text-right">Model%</th>
-                    <th className="px-5 py-3 text-right">Value</th>
-                    <th className="px-5 py-3 text-center">Category</th>
-                    <th className="px-5 py-3 text-center">Status</th>
+                    <th className="px-5 py-3 text-left">{dict.dashboard.market}</th>
+                    <th className="px-5 py-3 text-left">{dict.matchDetail.outcome}</th>
+                    <th className="px-5 py-3 text-left">{dict.matchDetail.bookmaker}</th>
+                    <th className="px-5 py-3 text-right">{dict.matchDetail.odds}</th>
+                    <th className="px-5 py-3 text-right">{dict.matchDetail.modelProbability}</th>
+                    <th className="px-5 py-3 text-right">{dict.matchDetail.value}</th>
+                    <th className="px-5 py-3 text-center">{dict.matchDetail.category}</th>
+                    <th className="px-5 py-3 text-center">{dict.matchDetail.status}</th>
                   </tr>
                 </thead>
                 <tbody>

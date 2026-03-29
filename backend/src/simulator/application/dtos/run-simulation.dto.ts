@@ -43,6 +43,10 @@ export class RunSimulationDto {
   onlyHighValue?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  projectPending?: boolean;
+
+  @IsOptional()
   dateFrom?: Date;
 
   @IsOptional()

@@ -6,6 +6,8 @@ export class OddsEntity {
   homeOdds: number;
   drawOdds: number;
   awayOdds: number;
+  overOdds?: number;
+  underOdds?: number;
   timestamp: Date;
   isSteamMove: boolean;
   previousOdds?: number;

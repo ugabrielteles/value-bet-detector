@@ -23,6 +23,12 @@ export class OddsHistory {
   @Prop({ required: true })
   awayOdds: number;
 
+  @Prop()
+  overOdds: number;
+
+  @Prop()
+  underOdds: number;
+
   @Prop({ required: true, index: true, default: Date.now })
   timestamp: Date;
 

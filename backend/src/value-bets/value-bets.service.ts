@@ -14,26 +14,33 @@ export class ValueBetsService {
 
   async detectAndSave(prediction: PredictionEntity, odds: OddsEntity, matchExpiresAt?: Date): Promise<ValueBetEntity[]> {
     const markets = [
-      { outcome: 'home', modelProbability: prediction.homeProbability, bookmakerOdds: odds.homeOdds },
-      { outcome: 'draw', modelProbability: prediction.drawProbability, bookmakerOdds: odds.drawOdds },
-      { outcome: 'away', modelProbability: prediction.awayProbability, bookmakerOdds: odds.awayOdds },
+      { market: '1X2', outcome: 'home', modelProbability: prediction.homeProbability, bookmakerOdds: odds.homeOdds },
+      { market: '1X2', outcome: 'draw', modelProbability: prediction.drawProbability, bookmakerOdds: odds.drawOdds },
+      { market: '1X2', outcome: 'away', modelProbability: prediction.awayProbability, bookmakerOdds: odds.awayOdds },
     ];
+
+    if (odds.overOdds && prediction.overProbability) {
+      markets.push({ market: 'Goals Over/Under', outcome: 'Over 2.5', modelProbability: prediction.overProbability, bookmakerOdds: odds.overOdds });
+    }
+    if (odds.underOdds && prediction.underProbability) {
+      markets.push({ market: 'Goals Over/Under', outcome: 'Under 2.5', modelProbability: prediction.underProbability, bookmakerOdds: odds.underOdds });
+    }
 
     const bets: ValueBetEntity[] = [];
 
-    for (const market of markets) {
-      const value = ProbabilityUtils.calculateValueBet(market.modelProbability, market.bookmakerOdds);
+    for (const mkt of markets) {
+      const value = ProbabilityUtils.calculateValueBet(mkt.modelProbability, mkt.bookmakerOdds);
       if (value > 0) {
         const classification = ProbabilityUtils.classifyValue(value);
-        const impliedProbability = ProbabilityUtils.impliedProbability(market.bookmakerOdds);
+        const impliedProbability = ProbabilityUtils.impliedProbability(mkt.bookmakerOdds);
         const bet = await this.valueBetsRepository.create({
           matchId: prediction.matchId,
           predictionId: prediction.id,
           bookmaker: odds.bookmaker,
-          market: '1X2',
-          outcome: market.outcome,
-          modelProbability: market.modelProbability,
-          bookmakerOdds: market.bookmakerOdds,
+          market: mkt.market,
+          outcome: mkt.outcome,
+          modelProbability: mkt.modelProbability,
+          bookmakerOdds: mkt.bookmakerOdds,
           impliedProbability,
           value,
           classification,

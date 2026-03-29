@@ -2,7 +2,7 @@ import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { BrowserRouter } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuthStore } from './store/authStore'
-import { Navigation } from './components/layout/Navigation'
+import Navigation from './components/layout/Navigation'
 import { FullPageSpinner } from './components/ui/Spinner'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -12,6 +12,8 @@ import Analytics from './pages/Analytics'
 import BankrollSettings from './pages/BankrollSettings'
 import Simulator from './pages/Simulator'
 import DataIngestion from './pages/DataIngestion'
+import LiveOpportunities from './pages/LiveOpportunities'
+import AdminPredictions from './pages/AdminPredictions'
 
 function ProtectedRoute() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -26,6 +28,16 @@ function ProtectedRoute() {
       <Outlet />
     </>
   )
+}
+
+function AdminRoute() {
+  const user = useAuthStore((s) => s.user)
+  const isAdmin = Boolean(
+    user && ((user.role === 'admin') || (Array.isArray(user.roles) && user.roles.includes('admin'))),
+  )
+
+  if (!isAdmin) return <Navigate to="/dashboard" replace />
+  return <Outlet />
 }
 
 function AppRoutes() {
@@ -46,9 +58,13 @@ function AppRoutes() {
         <Route path="/matches/:id" element={<MatchDetail />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/live-opportunities" element={<LiveOpportunities />} />
         <Route path="/data-ingestion" element={<DataIngestion />} />
         <Route path="/simulator" element={<Simulator />} />
         <Route path="/bankroll" element={<BankrollSettings />} />
+        <Route element={<AdminRoute />}>
+          <Route path="/admin/predictions" element={<AdminPredictions />} />
+        </Route>
       </Route>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

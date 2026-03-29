@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { io, Socket } from 'socket.io-client'
 import { useValueBetsStore } from '../store/valueBetsStore'
-import { ValueCategory } from '../types'
-import type { WebSocketEvent, ValueBet } from '../types'
+import type { WebSocketEvent, ValueBet, ValueCategory } from '../types'
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? 'http://localhost:3000'
 
@@ -27,7 +26,7 @@ type IncomingValueBet = Partial<ValueBet> & {
 
 function normalizeIncomingValueBet(raw: IncomingValueBet): ValueBet {
   const valueScore = raw.valueScore ?? raw.value ?? 0
-  const valueCategory = raw.valueCategory ?? raw.classification ?? ValueCategory.LOW
+  const valueCategory = raw.valueCategory ?? raw.classification ?? ('LOW' as ValueCategory)
 
   return {
     ...raw,

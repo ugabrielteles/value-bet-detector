@@ -16,6 +16,10 @@ export interface MatchStats {
   awayXG?: number;
   homeShots?: number;
   awayShots?: number;
+  homeShotsOnTarget?: number;
+  awayShotsOnTarget?: number;
+  homeCorners?: number;
+  awayCorners?: number;
   homePossession?: number;
   awayPossession?: number;
   homeForm?: string[];

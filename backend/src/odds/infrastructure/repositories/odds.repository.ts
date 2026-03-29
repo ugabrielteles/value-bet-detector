@@ -20,6 +20,8 @@ export class OddsRepository {
     entity.homeOdds = doc.homeOdds;
     entity.drawOdds = doc.drawOdds;
     entity.awayOdds = doc.awayOdds;
+    entity.overOdds = doc.overOdds;
+    entity.underOdds = doc.underOdds;
     entity.timestamp = doc.timestamp;
     entity.isSteamMove = doc.isSteamMove;
     entity.previousOdds = doc.previousOdds;

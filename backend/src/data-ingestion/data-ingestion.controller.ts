@@ -48,4 +48,9 @@ export class DataIngestionController {
   ) {
     return this.dataIngestionService.runOddsIngestion(leagueId, date);
   }
+
+  @Post('run-all-leagues')
+  async runAllLeagues(@Query('date') date?: string) {
+    return this.dataIngestionService.runAllLeagues(date);
+  }
 }

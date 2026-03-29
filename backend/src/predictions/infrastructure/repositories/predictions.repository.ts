@@ -32,7 +32,14 @@ export class PredictionsRepository {
   }
 
   async save(data: Partial<PredictionEntity>): Promise<PredictionEntity> {
-    const doc = await this.predictionModel.create(data);
-    return this.toEntity(doc);
+    const { matchId, ...fields } = data;
+    const doc = await this.predictionModel
+      .findOneAndUpdate(
+        { matchId },
+        { $set: fields },
+        { new: true, upsert: true, sort: { createdAt: -1 } },
+      )
+      .exec();
+    return this.toEntity(doc!);
   }
 }

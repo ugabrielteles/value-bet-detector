@@ -6,20 +6,25 @@ import { useI18n } from '../../hooks/useI18n'
 import { localeLabels } from '../../i18n/translations'
 
 const navItems = [
-  { to: '/dashboard', key: 'dashboard' },
-  { to: '/alerts', key: 'alerts' },
-  { to: '/analytics', key: 'analytics' },
-  { to: '/data-ingestion', key: 'ingestion' },
-  { to: '/simulator', key: 'simulator' },
-  { to: '/bankroll', key: 'bankroll' },
+  { to: '/dashboard', key: 'dashboard', adminOnly: false },
+  { to: '/alerts', key: 'alerts', adminOnly: false },
+  { to: '/analytics', key: 'analytics', adminOnly: false },
+  { to: '/live-opportunities', key: 'live', adminOnly: false },
+  { to: '/data-ingestion', key: 'ingestion', adminOnly: false },
+  { to: '/simulator', key: 'simulator', adminOnly: false },
+  { to: '/bankroll', key: 'bankroll', adminOnly: false },
+  { to: '/admin/predictions', key: 'adminPredictions', adminOnly: true },
 ] as const
 
-export function Navigation() {
+export default function Navigation() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
   const newAlertsCount = useValueBetsStore((s) => s.newAlertsCount)
   const { locale, setLocale, dict } = useI18n()
+  const isAdmin = Boolean(
+    user && ((user.role === 'admin') || (Array.isArray(user.roles) && user.roles.includes('admin'))),
+  )
 
   const handleLogout = () => {
     logout()
@@ -38,7 +43,7 @@ export function Navigation() {
 
           {/* Nav Links */}
           <div className="hidden md:flex items-center gap-1">
-            {navItems.map((item) => (
+            {navItems.filter((item) => !item.adminOnly || isAdmin).map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

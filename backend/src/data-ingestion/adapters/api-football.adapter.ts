@@ -32,13 +32,38 @@ export class ApiFootballAdapter implements BookmakerAdapter {
     }
   }
 
-  private deriveSeason(date: string): string {
+  /**
+   * International (national-team) leagues use the calendar year as season
+   * identifier, not the football-year convention used by club leagues.
+   * Add any new international league IDs from API-Football here.
+   */
+  private static readonly CALENDAR_YEAR_LEAGUES = new Set([
+    '1',   // World Cup
+    '5',   // UEFA Nations League
+    '6',   // Euro Championship
+    '9',   // Copa America
+    '10',  // World Cup Qualifiers – UEFA
+    '11',  // World Cup Qualifiers – CONMEBOL
+    '29',  // World Cup Qualifiers – AFC
+    '30',  // World Cup Qualifiers – CAF
+    '31',  // World Cup Qualifiers – CONCACAF
+    '32',  // World Cup Qualifiers – OFC
+    '667', // International Friendlies
+    '669', // International Friendlies (Women)
+  ]);
+
+  private deriveSeason(date: string, leagueId?: string): string {
     const [yearString, monthString] = date.split('-');
     const year = Number(yearString);
     const month = Number(monthString);
 
     if (!year || !month) {
       return String(new Date().getFullYear());
+    }
+
+    // International leagues are keyed by calendar year, not football season year
+    if (leagueId && ApiFootballAdapter.CALENDAR_YEAR_LEAGUES.has(leagueId)) {
+      return String(year);
     }
 
     return String(month >= 7 ? year : year - 1);
@@ -83,13 +108,82 @@ export class ApiFootballAdapter implements BookmakerAdapter {
   }
 
   async fetchFixtures(leagueId: string, date: string): Promise<unknown[]> {
-    const params = { league: leagueId, date, season: this.deriveSeason(date) };
+    const params = { league: leagueId, date, season: this.deriveSeason(date, leagueId) };
     return this.withRetry('/fixtures', params, async () => {
       const response = await this.client.get('/fixtures', { params });
       this.ensureApiPayloadIsValid('/fixtures', response);
       this.logSuccess('/fixtures', params, response);
       return response.data?.response ?? [];
     });
+  }
+
+  /**
+   * Fetches all fixtures worldwide for a given date (no league filter).
+   * Returns results page by page (API-Football paginates at 100 items).
+   */
+  async fetchFixturesByDate(date: string): Promise<unknown[]> {
+    const allFixtures: unknown[] = [];
+    let page = 1;
+
+    while (true) {
+      const params: Record<string, string> = { date, page: String(page) };
+      const results = await this.withRetry('/fixtures', params, async () => {
+        const response = await this.client.get('/fixtures', { params });
+        this.ensureApiPayloadIsValid('/fixtures', response);
+        this.logSuccess('/fixtures', params, response);
+        return response.data as { response: unknown[]; paging?: { current: number; total: number } };
+      });
+
+      const items: unknown[] = (results as any).response ?? [];
+      allFixtures.push(...items);
+
+      const paging = (results as any).paging;
+      if (!paging || paging.current >= paging.total || items.length === 0) break;
+
+      page += 1;
+      // Small delay between pages to stay within rate limits
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    return allFixtures;
+  }
+
+  /**
+   * Returns all leagues that currently have ongoing or upcoming fixtures.
+   * Useful for dynamically discovering all leagues for global ingestion.
+   * Results are paged; this method collects all pages.
+   */
+  async fetchLeagues(season: number): Promise<{ id: number; name: string; country: string }[]> {
+    const leagues: { id: number; name: string; country: string }[] = [];
+    let page = 1;
+
+    while (true) {
+      const params: Record<string, string> = { current: 'true', season: String(season), page: String(page) };
+      const results = await this.withRetry('/leagues', params, async () => {
+        const response = await this.client.get('/leagues', { params });
+        this.ensureApiPayloadIsValid('/leagues', response);
+        this.logSuccess('/leagues', params, response);
+        return response.data as { response: unknown[]; paging?: { current: number; total: number } };
+      });
+
+      const items: any[] = (results as any).response ?? [];
+      for (const item of items) {
+        const leagueId = item?.league?.id;
+        const leagueName = item?.league?.name;
+        const country = item?.country?.name;
+        if (leagueId) {
+          leagues.push({ id: Number(leagueId), name: String(leagueName ?? ''), country: String(country ?? '') });
+        }
+      }
+
+      const paging = (results as any).paging;
+      if (!paging || paging.current >= paging.total || items.length === 0) break;
+
+      page += 1;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    return leagues;
   }
 
   async fetchOdds(matchId: string): Promise<unknown[]> {

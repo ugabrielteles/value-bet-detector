@@ -68,6 +68,22 @@ export default function Analytics() {
     return typeof av === 'number' && typeof bv === 'number' ? bv - av : 0
   })
 
+  const toSafeNumber = (value: unknown, fallback = 0): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : fallback
+  }
+
+  const formatPct = (value: unknown, digits = 1): string => `${(toSafeNumber(value) * 100).toFixed(digits)}%`
+  const formatSignedPct = (value: unknown, digits = 1): string => {
+    const n = toSafeNumber(value)
+    return `${n >= 0 ? '+' : ''}${(n * 100).toFixed(digits)}%`
+  }
+  const formatSignedMoney = (value: unknown, digits = 2): string => {
+    const n = toSafeNumber(value)
+    return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}`
+  }
+
   if (isLoading) {
     return (
       <div className="flex justify-center items-center py-20">
@@ -93,24 +109,24 @@ export default function Analytics() {
 
       {/* 8 Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <MetricCard label="Total Bets" value={summary.totalBets.toString()} sub={`${summary.settledBets} settled`} />
-        <MetricCard label="Pending Bets" value={summary.pendingBets.toString()} />
-        <MetricCard label="Hit Rate" value={`${(summary.hitRate * 100).toFixed(1)}%`} />
+        <MetricCard label="Total Bets" value={toSafeNumber(summary.totalBets).toString()} sub={`${toSafeNumber(summary.settledBets)} settled`} />
+        <MetricCard label="Pending Bets" value={toSafeNumber(summary.pendingBets).toString()} />
+        <MetricCard label="Hit Rate" value={formatPct(summary.hitRate)} />
         <MetricCard
           label="ROI"
-          value={`${summary.roi >= 0 ? '+' : ''}${(summary.roi * 100).toFixed(1)}%`}
-          positive={summary.roi > 0}
-          negative={summary.roi < 0}
+          value={formatSignedPct(summary.roi)}
+          positive={toSafeNumber(summary.roi) > 0}
+          negative={toSafeNumber(summary.roi) < 0}
         />
         <MetricCard
           label="Total Profit"
-          value={`${summary.totalProfit >= 0 ? '+' : ''}${summary.totalProfit.toFixed(2)}`}
-          positive={summary.totalProfit > 0}
-          negative={summary.totalProfit < 0}
+          value={formatSignedMoney(summary.totalProfit)}
+          positive={toSafeNumber(summary.totalProfit) > 0}
+          negative={toSafeNumber(summary.totalProfit) < 0}
         />
-        <MetricCard label="Yield" value={`${(summary.yield * 100).toFixed(1)}%`} />
-        <MetricCard label="Avg Odds" value={summary.averageOdds.toFixed(2)} />
-        <MetricCard label="Avg Value" value={`+${(summary.averageValue * 100).toFixed(1)}%`} positive />
+        <MetricCard label="Yield" value={formatPct(summary.yield)} />
+        <MetricCard label="Avg Odds" value={toSafeNumber(summary.averageOdds).toFixed(2)} />
+        <MetricCard label="Avg Value" value={formatSignedPct(summary.averageValue)} positive={toSafeNumber(summary.averageValue) > 0} />
       </div>
 
       {/* Value Category Distribution */}
@@ -179,13 +195,13 @@ export default function Analytics() {
               <XAxis dataKey="date" tick={{ fill: '#9ca3af', fontSize: 10 }} />
               <YAxis unit="%" tick={{ fill: '#9ca3af', fontSize: 11 }} />
               <Tooltip
-                formatter={(value: number) => [`${value.toFixed(1)}%`, 'ROI']}
+                formatter={(value: number | string) => [`${toSafeNumber(value).toFixed(1)}%`, 'ROI']}
                 contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
                 labelStyle={{ color: '#e5e7eb' }}
               />
               <Bar dataKey="roi" name="Daily ROI" radius={[3, 3, 0, 0]}>
                 {daily.map((entry, index) => (
-                  <Cell key={index} fill={entry.roi >= 0 ? '#22c55e' : '#ef4444'} />
+                  <Cell key={index} fill={toSafeNumber(entry.roi) >= 0 ? '#22c55e' : '#ef4444'} />
                 ))}
               </Bar>
             </BarChart>
@@ -205,14 +221,14 @@ export default function Analytics() {
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between"><span className="text-gray-400">Bets</span><span className="text-white">{cat.bets}</span></div>
                     <div className="flex justify-between"><span className="text-gray-400">Won</span><span className="text-white">{cat.won}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-400">Hit Rate</span><span className="text-white">{(cat.hitRate * 100).toFixed(1)}%</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">Hit Rate</span><span className="text-white">{formatPct(cat.hitRate)}</span></div>
                     <div className="flex justify-between">
                       <span className="text-gray-400">ROI</span>
-                      <span className={cat.roi >= 0 ? 'text-green-400' : 'text-red-400'}>{(cat.roi * 100).toFixed(1)}%</span>
+                      <span className={toSafeNumber(cat.roi) >= 0 ? 'text-green-400' : 'text-red-400'}>{formatPct(cat.roi)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-400">Profit</span>
-                      <span className={cat.profit >= 0 ? 'text-green-400' : 'text-red-400'}>{cat.profit >= 0 ? '+' : ''}{cat.profit.toFixed(2)}</span>
+                      <span className={toSafeNumber(cat.profit) >= 0 ? 'text-green-400' : 'text-red-400'}>{formatSignedMoney(cat.profit)}</span>
                     </div>
                   </div>
                 </CardBody>
@@ -271,12 +287,12 @@ export default function Analytics() {
                       <td className="px-5 py-3 text-white font-medium">{m.market}</td>
                       <td className="px-5 py-3 text-gray-300">{m.bets}</td>
                       <td className="px-5 py-3 text-gray-300">{m.won}</td>
-                      <td className="px-5 py-3 text-gray-300">{(m.hitRate * 100).toFixed(1)}%</td>
-                      <td className={`px-5 py-3 font-medium ${m.roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {(m.roi * 100).toFixed(1)}%
+                      <td className="px-5 py-3 text-gray-300">{formatPct(m.hitRate)}</td>
+                      <td className={`px-5 py-3 font-medium ${toSafeNumber(m.roi) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {formatPct(m.roi)}
                       </td>
-                      <td className={`px-5 py-3 font-medium ${m.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {m.profit >= 0 ? '+' : ''}{m.profit.toFixed(2)}
+                      <td className={`px-5 py-3 font-medium ${toSafeNumber(m.profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {formatSignedMoney(m.profit)}
                       </td>
                     </tr>
                   ))}

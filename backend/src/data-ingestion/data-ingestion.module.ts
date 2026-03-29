@@ -5,6 +5,8 @@ import { ApiFootballAdapter } from './adapters/api-football.adapter';
 import { DataIngestionController } from './data-ingestion.controller';
 import { MatchesModule } from '../matches/matches.module';
 import { OddsModule } from '../odds/odds.module';
+import { PredictionsModule } from '../predictions/predictions.module';
+import { ValueBetsModule } from '../value-bets/value-bets.module';
 import { IngestionLog, IngestionLogSchema } from './infrastructure/models/ingestion-log.model';
 import { IngestionLogRepository } from './infrastructure/repositories/ingestion-log.repository';
 
@@ -12,6 +14,8 @@ import { IngestionLogRepository } from './infrastructure/repositories/ingestion-
   imports: [
     MatchesModule,
     OddsModule,
+    PredictionsModule,
+    ValueBetsModule,
     MongooseModule.forFeature([{ name: IngestionLog.name, schema: IngestionLogSchema }]),
   ],
   controllers: [DataIngestionController],

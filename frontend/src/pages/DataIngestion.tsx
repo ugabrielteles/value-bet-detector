@@ -47,6 +47,8 @@ export default function DataIngestion() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRunningFixtures, setIsRunningFixtures] = useState(false)
   const [isRunningOdds, setIsRunningOdds] = useState(false)
+  const [isRunningAll, setIsRunningAll] = useState(false)
+  const [allLeaguesSummaries, setAllLeaguesSummaries] = useState<IngestionSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastRun, setLastRun] = useState<IngestionSummary | null>(null)
   const { dict } = useI18n()
@@ -111,6 +113,22 @@ export default function DataIngestion() {
     }
   }
 
+  const runAllLeagues = async () => {
+    setIsRunningAll(true)
+    setError(null)
+    setAllLeaguesSummaries(null)
+    try {
+      const summaries = await dataIngestionApi.runAllLeagues(date || undefined)
+      setAllLeaguesSummaries(summaries)
+      if (summaries.length > 0) setLastRun(summaries[summaries.length - 1])
+      await loadLogs(filters)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run all leagues')
+    } finally {
+      setIsRunningAll(false)
+    }
+  }
+
   const latest = logs[0]
   const successCount = logs.filter((log) => log.status === 'success').length
   const fallbackCount = logs.filter((log) => log.fallbackUsed).length
@@ -122,11 +140,7 @@ export default function DataIngestion() {
           <h1 className="text-2xl font-bold text-white">{dict.ingestion.title}</h1>
           <p className="text-sm text-gray-400 mt-1">{dict.ingestion.subtitle}</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => void loadLogs(filters)}>{dict.ingestion.refreshLogs}</Button>
-          <Button variant="secondary" onClick={runFixtures} isLoading={isRunningFixtures}>{dict.ingestion.runFixtures}</Button>
-          <Button variant="primary" onClick={runOdds} isLoading={isRunningOdds}>{dict.ingestion.runOdds}</Button>
-        </div>
+        <Button variant="secondary" onClick={() => void loadLogs(filters)}>{dict.ingestion.refreshLogs}</Button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -137,11 +151,31 @@ export default function DataIngestion() {
       </div>
 
       <Card>
-        <CardHeader><h2 className="font-semibold text-white">{dict.ingestion.manualRun}</h2></CardHeader>
-        <CardBody className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Input label={dict.ingestion.leagueId} value={leagueId} onChange={(e) => setLeagueId(e.target.value)} placeholder="39" />
-          <Input label={dict.ingestion.date} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <div className="text-sm text-gray-400 self-end pb-2">{dict.ingestion.emptyDateHint}</div>
+        <CardHeader>
+          <h2 className="font-semibold text-white">{dict.ingestion.manualRun}</h2>
+        </CardHeader>
+        <CardBody className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label={dict.ingestion.leagueId} value={leagueId} onChange={(e) => setLeagueId(e.target.value)} placeholder="39" />
+            <Input label={dict.ingestion.date} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <p className="text-xs text-gray-500">{dict.ingestion.emptyDateHint}</p>
+          <div className="flex flex-wrap gap-3 pt-1">
+            <Button variant="secondary" onClick={runFixtures} isLoading={isRunningFixtures}>
+              {dict.ingestion.runFixtures}
+            </Button>
+            <Button variant="secondary" onClick={runOdds} isLoading={isRunningOdds}>
+              {dict.ingestion.runOdds}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={runAllLeagues}
+              isLoading={isRunningAll}
+              title="Runs odds + fixtures for ALL leagues configured in INGESTION_LEAGUE_IDS"
+            >
+              Run All Leagues
+            </Button>
+          </div>
         </CardBody>
       </Card>
 
@@ -155,6 +189,40 @@ export default function DataIngestion() {
             <div><div className="text-gray-400">{dict.ingestion.matchesUpserted}</div><div className="text-white font-medium">{lastRun.matchesUpserted}</div></div>
             <div><div className="text-gray-400">{dict.ingestion.oddsSaved}</div><div className="text-white font-medium">{lastRun.oddsSaved}</div></div>
             <div><div className="text-gray-400">{dict.ingestion.fallback}</div><div className="text-white font-medium">{lastRun.fallbackUsed ? lastRun.fallbackDate ?? dict.ingestion.yes : dict.ingestion.no}</div></div>
+          </CardBody>
+        </Card>
+      )}
+
+      {allLeaguesSummaries && allLeaguesSummaries.length > 0 && (
+        <Card>
+          <CardHeader>
+            <h2 className="font-semibold text-white">All Leagues – Run Results</h2>
+          </CardHeader>
+          <CardBody className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-700 text-left text-xs uppercase text-gray-400">
+                    <th className="px-5 py-3">League ID</th>
+                    <th className="px-5 py-3">{dict.ingestion.fixtures}</th>
+                    <th className="px-5 py-3">{dict.ingestion.matchesUpserted}</th>
+                    <th className="px-5 py-3">{dict.ingestion.oddsSaved}</th>
+                    <th className="px-5 py-3">{dict.ingestion.error}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allLeaguesSummaries.map((s, i) => (
+                    <tr key={i} className="border-b border-gray-700 hover:bg-gray-700/20">
+                      <td className="px-5 py-3 text-white font-medium">{s.leagueId}</td>
+                      <td className="px-5 py-3 text-gray-300">{s.fixturesFetched}</td>
+                      <td className="px-5 py-3 text-gray-300">{s.matchesUpserted}</td>
+                      <td className="px-5 py-3 text-gray-300">{s.oddsSaved}</td>
+                      <td className="px-5 py-3 text-xs text-red-300">{s.errors.length > 0 ? s.errors.join(' | ') : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </CardBody>
         </Card>
       )}

@@ -4,6 +4,7 @@ export interface User {
   email: string
   username: string
   role: 'admin' | 'user'
+  roles?: string[]
   createdAt: string
   updatedAt: string
 }
@@ -44,6 +45,10 @@ export interface MatchStats {
   awayXG?: number
   homeShots?: number
   awayShots?: number
+  homeShotsOnTarget?: number
+  awayShotsOnTarget?: number
+  homeCorners?: number
+  awayCorners?: number
   homePossession?: number
   awayPossession?: number
   homeForm?: string[]
@@ -108,6 +113,112 @@ export interface PredictionResult {
   modelVersion: string
   predictions: ModelPrediction[]
   createdAt: string
+}
+
+export interface TeamProjection {
+  side: 'home' | 'away'
+  expectedGoals: number
+  expectedShots: number
+  expectedShotsOnTarget: number
+  expectedCorners: number
+}
+
+export interface BettingOpportunity {
+  market: string
+  selection: string
+  phase: 'pre-match' | 'live'
+  confidence: number
+  valueEdge?: number
+  rationale: string
+}
+
+export interface MatchPredictionInsights {
+  matchId: string
+  matchStartTime?: string
+  homeTeamName?: string
+  awayTeamName?: string
+  matchStatus: Match['status']
+  generatedAt: string
+  winProbabilities: {
+    home: number
+    draw: number
+    away: number
+  }
+  projectedTeams: {
+    home: TeamProjection
+    away: TeamProjection
+  }
+  projectedTotals: {
+    goals: number
+    shots: number
+    shotsOnTarget: number
+    corners: number
+  }
+  opportunities: BettingOpportunity[]
+}
+
+export interface TodayOpportunitiesFilters {
+  limit?: number
+  leagueIds?: string[]
+  countries?: string[]
+  internationalOnly?: boolean
+}
+
+export type OpportunityResult = 'pending' | 'won' | 'lost' | 'void'
+
+export interface PersistedPredictionOpportunity {
+  _id: string
+  matchId: string
+  matchStartTime?: string
+  homeTeamName?: string
+  awayTeamName?: string
+  leagueId?: string
+  leagueName?: string
+  leagueCountry?: string
+  isInternational?: boolean
+  market: string
+  selection: string
+  phase: 'pre-match' | 'live'
+  confidence: number
+  valueEdge?: number
+  rationale: string
+  matchStatus: Match['status']
+  result: OpportunityResult
+  generatedAt: string
+  projectedTotals: {
+    goals: number
+    shots: number
+    shotsOnTarget: number
+    corners: number
+  }
+  winProbabilities: {
+    home: number
+    draw: number
+    away: number
+  }
+}
+
+export interface LiveOpportunitiesFilters {
+  limit?: number
+  leagueIds?: string[]
+  countries?: string[]
+  internationalOnly?: boolean
+}
+
+export interface OpportunityMarketStats {
+  market: string
+  total: number
+  won: number
+  lost: number
+  pending: number
+  hitRate: number
+}
+
+export interface RecalculatePredictionsResult {
+  total: number
+  recalculated: number
+  failed: number
+  failures: string[]
 }
 
 // Value Bets
@@ -277,6 +388,7 @@ export interface RunSimulationParams {
   maxOdds?: number
   minValue?: number
   onlyHighValue?: boolean
+  projectPending?: boolean
   dateFrom?: string
   dateTo?: string
 }
@@ -311,6 +423,7 @@ export interface Simulation {
   maxOdds: number
   minValue: number
   onlyHighValue: boolean
+  projectPending?: boolean
   dateFrom: string
   dateTo: string
   status: SimulationStatus
@@ -318,6 +431,7 @@ export interface Simulation {
   totalBets: number
   wonBets: number
   lostBets: number
+  pendingBets?: number
   totalStaked: number
   totalProfit: number
   roi: number

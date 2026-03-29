@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import axios from 'axios'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
@@ -24,9 +25,28 @@ function MetricCard({ label, value, positive, negative }: MetricCardProps) {
   )
 }
 
+function toSafeNumber(value: unknown): number {
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num : 0
+}
+
+function formatFixed(value: unknown, digits = 2): string {
+  return toSafeNumber(value).toFixed(digits)
+}
+
 export default function Simulator() {
+  const SIMS_PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+  const BETS_PAGE_SIZE_OPTIONS = [50, 100, 200] as const
   const [simulations, setSimulations] = useState<Simulation[]>([])
+  const [simsPage, setSimsPage] = useState(1)
+  const [simsTotal, setSimsTotal] = useState(0)
+  const [simsPageSize, setSimsPageSize] = useState<number>(20)
   const [selected, setSelected] = useState<Simulation | null>(null)
+  const [simulationBets, setSimulationBets] = useState<Simulation['bets']>([])
+  const [betsTotal, setBetsTotal] = useState(0)
+  const [betsPage, setBetsPage] = useState(1)
+  const [betsPageSize, setBetsPageSize] = useState<number>(100)
+  const [isLoadingBets, setIsLoadingBets] = useState(false)
   const [chartData, setChartData] = useState<SimulationChartPoint[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [isLoadingSims, setIsLoadingSims] = useState(true)
@@ -41,23 +61,184 @@ export default function Simulator() {
   const [kellyFraction, setKellyFraction] = useState(0.25)
   const [minOdds, setMinOdds] = useState(1.5)
   const [maxOdds, setMaxOdds] = useState(10)
-  const [minValue, setMinValue] = useState(5)
+  const [minValue, setMinValue] = useState(0)
   const [onlyHighValue, setOnlyHighValue] = useState(false)
+  const [projectPending, setProjectPending] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const { dict } = useI18n()
+  const activeSimulationRef = useRef<string | null>(null)
+  const betsCacheRef = useRef(new Map<string, { total: number; pages: Map<number, Simulation['bets']> }>())
+  const simulationSignatureRef = useRef(new Map<string, string>())
+  const betsInFlightRef = useRef(new Map<string, Promise<{ bets: Simulation['bets']; total: number; page: number; limit: number }>>())
+
+  const getPendingCount = (sim: Simulation) => {
+    if (sim.bets.length > 0) return sim.bets.filter((bet) => bet.status === 'pending').length
+    return sim.pendingBets ?? 0
+  }
+
+  const totalPages = Math.max(1, Math.ceil(simsTotal / simsPageSize))
+  const betsTotalPages = Math.max(1, Math.ceil((betsTotal || 0) / betsPageSize))
+
+  const loadSimulationsPage = async (page: number) => {
+    setIsLoadingSims(true)
+    try {
+      const res = await simulatorApi.getSimulations({ page, limit: simsPageSize })
+      setSimulations(res.data)
+      setSimsTotal(res.total)
+      setSimsPage(res.page)
+    } catch {
+      // noop
+    } finally {
+      setIsLoadingSims(false)
+    }
+  }
 
   useEffect(() => {
-    simulatorApi.getSimulations()
-      .then(setSimulations)
-      .catch(() => {})
-      .finally(() => setIsLoadingSims(false))
-  }, [])
+    void loadSimulationsPage(1)
+  }, [simsPageSize])
+
+  const buildSimulationSignature = (sim: Simulation) => {
+    return [
+      sim.id,
+      sim.status,
+      sim.totalBets,
+      sim.wonBets,
+      sim.lostBets,
+      sim.pendingBets ?? 0,
+      sim.totalProfit,
+      sim.currentBankroll,
+    ].join('|')
+  }
+
+  const clearSimulationCache = (simulationId: string) => {
+    const prefix = `${simulationId}::`
+    for (const key of betsCacheRef.current.keys()) {
+      if (key.startsWith(prefix)) {
+        betsCacheRef.current.delete(key)
+      }
+    }
+    for (const key of betsInFlightRef.current.keys()) {
+      if (key.startsWith(prefix)) {
+        betsInFlightRef.current.delete(key)
+      }
+    }
+  }
+
+  const getBetsCacheKey = (simulationId: string, limit: number) => `${simulationId}::${limit}`
+
+  const readCachedBetsPage = (simulationId: string, page: number, limit: number) => {
+    const cache = betsCacheRef.current.get(getBetsCacheKey(simulationId, limit))
+    if (!cache) return null
+    const bets = cache.pages.get(page)
+    if (!bets) return null
+    return { bets, total: cache.total }
+  }
+
+  const writeCachedBetsPage = (
+    simulationId: string,
+    page: number,
+    limit: number,
+    total: number,
+    bets: Simulation['bets'],
+  ) => {
+    const key = getBetsCacheKey(simulationId, limit)
+    const existing = betsCacheRef.current.get(key) ?? { total, pages: new Map<number, Simulation['bets']>() }
+    existing.total = total
+    existing.pages.set(page, bets)
+    betsCacheRef.current.set(key, existing)
+  }
+
+  const fetchBetsPage = async (simulationId: string, page: number, limit: number) => {
+    const requestKey = `${simulationId}::${page}::${limit}`
+    const existing = betsInFlightRef.current.get(requestKey)
+    if (existing) return existing
+
+    const promise = simulatorApi
+      .getSimulationBets(simulationId, { page, limit })
+      .then((res) => {
+        writeCachedBetsPage(simulationId, res.page, res.limit, res.total, res.bets)
+        return res
+      })
+      .finally(() => {
+        betsInFlightRef.current.delete(requestKey)
+      })
+
+    betsInFlightRef.current.set(requestKey, promise)
+    return promise
+  }
+
+  const prefetchAdjacentBetsPages = (simulationId: string, page: number, total: number, limit: number) => {
+    const totalPagesForLimit = Math.max(1, Math.ceil(total / limit))
+    const candidates = [page - 1, page + 1].filter((candidate) => candidate >= 1 && candidate <= totalPagesForLimit)
+
+    for (const candidate of candidates) {
+      if (readCachedBetsPage(simulationId, candidate, limit)) continue
+      void fetchBetsPage(simulationId, candidate, limit).catch(() => {
+        // noop
+      })
+    }
+  }
+
+  const loadSimulationBetsPage = async (simulationId: string, page: number, limit = betsPageSize) => {
+    setIsLoadingBets(true)
+    try {
+      const cached = readCachedBetsPage(simulationId, page, limit)
+      if (cached) {
+        if (activeSimulationRef.current === simulationId) {
+          setSimulationBets(cached.bets)
+          setBetsTotal(cached.total)
+          setBetsPage(page)
+        }
+        prefetchAdjacentBetsPages(simulationId, page, cached.total, limit)
+        return
+      }
+
+      const res = await fetchBetsPage(simulationId, page, limit)
+      if (activeSimulationRef.current !== simulationId) return
+
+      setSimulationBets(res.bets)
+      setBetsTotal(res.total)
+      setBetsPage(res.page)
+      prefetchAdjacentBetsPages(simulationId, res.page, res.total, limit)
+    } catch {
+      if (activeSimulationRef.current === simulationId) {
+        setSimulationBets([])
+      }
+    } finally {
+      if (activeSimulationRef.current === simulationId) {
+        setIsLoadingBets(false)
+      }
+    }
+  }
 
   const loadSimulation = async (sim: Simulation) => {
+    activeSimulationRef.current = sim.id
     setSelected(sim)
+    setBetsPage(1)
+    setSimulationBets([])
+    setBetsTotal(sim.totalBets ?? 0)
+    void loadSimulationBetsPage(sim.id, 1, betsPageSize)
     try {
-      const chart = await simulatorApi.getSimulationChart(sim.id)
+      const [summarySimulation, chart] = await Promise.all([
+        simulatorApi.getSimulationSummary(sim.id),
+        simulatorApi.getSimulationChart(sim.id),
+      ])
+
+      const nextSignature = buildSimulationSignature(summarySimulation)
+      const previousSignature = simulationSignatureRef.current.get(sim.id)
+      if (previousSignature && previousSignature !== nextSignature) {
+        clearSimulationCache(sim.id)
+        if (activeSimulationRef.current === sim.id) {
+          setSimulationBets([])
+          setBetsPage(1)
+          void loadSimulationBetsPage(sim.id, 1, betsPageSize)
+        }
+      }
+      simulationSignatureRef.current.set(sim.id, nextSignature)
+
+      setSelected(summarySimulation)
+      setBetsTotal(summarySimulation.totalBets ?? 0)
       setChartData(chart)
     } catch {
       setChartData([])
@@ -79,15 +260,29 @@ export default function Simulator() {
       maxOdds,
       minValue: minValue / 100,
       onlyHighValue,
+      projectPending,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
     }
     try {
       const sim = await simulatorApi.runSimulation(params)
-      setSimulations((prev) => [sim, ...prev])
+      await loadSimulationsPage(1)
       await loadSimulation(sim)
     } catch (err) {
-      setError(err instanceof Error ? err.message : dict.simulator.simulationFailed)
+      if (axios.isAxiosError(err)) {
+        const responseMessage = err.response?.data && typeof err.response.data === 'object'
+          ? (err.response.data as { message?: string | string[] }).message
+          : undefined
+        if (Array.isArray(responseMessage) && responseMessage.length > 0) {
+          setError(responseMessage[0])
+        } else if (typeof responseMessage === 'string' && responseMessage.trim()) {
+          setError(responseMessage)
+        } else {
+          setError(dict.simulator.simulationFailed)
+        }
+      } else {
+        setError(err instanceof Error ? err.message : dict.simulator.simulationFailed)
+      }
     } finally {
       setIsRunning(false)
     }
@@ -137,6 +332,16 @@ export default function Simulator() {
                 <input type="checkbox" id="highOnly" checked={onlyHighValue} onChange={(e) => setOnlyHighValue(e.target.checked)} className="w-4 h-4 accent-blue-500" />
                 <label htmlFor="highOnly" className="text-sm text-gray-300">{dict.simulator.highValueOnly}</label>
               </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="projectPending"
+                  checked={projectPending}
+                  onChange={(e) => setProjectPending(e.target.checked)}
+                  className="w-4 h-4 accent-blue-500"
+                />
+                <label htmlFor="projectPending" className="text-sm text-gray-300">Projetar pendentes/ao vivo (valor esperado)</label>
+              </div>
               <Input label={dict.simulator.dateFrom} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
               <Input label={dict.simulator.dateTo} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
 
@@ -151,24 +356,70 @@ export default function Simulator() {
           {/* Previous simulations */}
           <Card>
             <CardHeader><h2 className="font-semibold text-white text-sm">{dict.simulator.previousSimulations}</h2></CardHeader>
-            <CardBody className="p-0 max-h-72 overflow-y-auto">
+            <CardBody className="p-0">
               {isLoadingSims ? (
                 <div className="flex justify-center py-4"><Spinner size="sm" /></div>
               ) : simulations.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center py-4">{dict.simulator.noSimulationsYet}</p>
               ) : (
-                simulations.map((sim) => (
-                  <button
-                    key={sim.id}
-                    onClick={() => loadSimulation(sim)}
-                    className={`w-full text-left px-4 py-3 border-b border-gray-700 hover:bg-gray-700/50 transition-colors ${selected?.id === sim.id ? 'bg-gray-700/50' : ''}`}
-                  >
-                    <div className="text-sm font-medium text-white truncate">{sim.name || `Sim ${sim.id.slice(0, 8)}`}</div>
-                    <div className="text-xs text-gray-400 mt-0.5">
-                      {sim.totalBets} {dict.simulator.betsShort} · ROI: {(sim.roi * 100).toFixed(1)}%
+                <>
+                  <div className="max-h-72 overflow-y-auto">
+                    {simulations.map((sim) => (
+                      <button
+                        key={sim.id}
+                        onClick={() => loadSimulation(sim)}
+                        className={`w-full text-left px-4 py-3 border-b border-gray-700 hover:bg-gray-700/50 transition-colors ${selected?.id === sim.id ? 'bg-gray-700/50' : ''}`}
+                      >
+                        <div className="text-sm font-medium text-white truncate">{sim.name || `Sim ${sim.id.slice(0, 8)}`}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          {sim.totalBets} {dict.simulator.betsShort}
+                          {' · '}
+                          {dict.simulator.won}: {sim.wonBets}
+                          {' · '}
+                          {dict.simulator.lost}: {sim.lostBets}
+                          {' · '}
+                          {dict.simulator.pending}: {getPendingCount(sim)}
+                          {' · '}
+                          ROI: {(sim.roi * 100).toFixed(1)}%
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-2 border-t border-gray-700 bg-gray-800/60">
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="sim-page-size" className="text-xs text-gray-400">por pagina</label>
+                      <select
+                        id="sim-page-size"
+                        value={simsPageSize}
+                        onChange={(e) => setSimsPageSize(Number(e.target.value) || 20)}
+                        className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white"
+                      >
+                        {SIMS_PAGE_SIZE_OPTIONS.map((size) => (
+                          <option key={size} value={size}>{size}</option>
+                        ))}
+                      </select>
                     </div>
-                  </button>
-                ))
+                    <button
+                      type="button"
+                      onClick={() => void loadSimulationsPage(simsPage - 1)}
+                      disabled={simsPage <= 1 || isLoadingSims}
+                      className="px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-200 disabled:opacity-40"
+                    >
+                      Anterior
+                    </button>
+                    <span className="text-xs text-gray-400 text-center">
+                      Pagina {simsPage} de {totalPages} ({simsTotal})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void loadSimulationsPage(simsPage + 1)}
+                      disabled={simsPage >= totalPages || isLoadingSims}
+                      className="px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-200 disabled:opacity-40"
+                    >
+                      Proxima
+                    </button>
+                  </div>
+                </>
               )}
             </CardBody>
           </Card>
@@ -196,6 +447,7 @@ export default function Simulator() {
                 <MetricCard label={dict.simulator.totalBets} value={selected.totalBets.toString()} />
                 <MetricCard label={dict.simulator.won} value={selected.wonBets.toString()} positive />
                 <MetricCard label={dict.simulator.lost} value={selected.lostBets.toString()} negative />
+                <MetricCard label={dict.simulator.pending} value={getPendingCount(selected).toString()} />
                 <MetricCard label={dict.simulator.hitRate} value={`${(selected.hitRate * 100).toFixed(1)}%`} />
                 <MetricCard
                   label={dict.simulator.roi}
@@ -237,7 +489,7 @@ export default function Simulator() {
               )}
 
               {/* Bets Table */}
-              {selected.bets.length > 0 && (
+              {betsTotal > 0 && (
                 <Card>
                   <CardHeader><h3 className="font-semibold text-white">{dict.simulator.betByBetResults}</h3></CardHeader>
                   <CardBody className="p-0 max-h-80 overflow-y-auto">
@@ -255,25 +507,80 @@ export default function Simulator() {
                         </tr>
                       </thead>
                       <tbody>
-                        {selected.bets.map((bet, i) => (
-                          <tr key={bet.valueBetId} className="border-b border-gray-700 hover:bg-gray-700/30">
-                            <td className="px-4 py-2 text-gray-400">{i + 1}</td>
-                            <td className="px-4 py-2 text-gray-300">{bet.market}</td>
+                        {simulationBets.map((bet, i) => (
+                          <tr key={`${bet.valueBetId || bet.matchId || 'bet'}-${i}`} className="border-b border-gray-700 hover:bg-gray-700/30">
+                            <td className="px-4 py-2 text-gray-400">{(betsPage - 1) * betsPageSize + i + 1}</td>
+                            <td className="px-4 py-2 text-gray-300">{bet.market || '-'}</td>
                             <td className="px-4 py-2 text-white">{bet.outcome}</td>
-                            <td className="px-4 py-2 text-right text-white">{bet.odds.toFixed(2)}</td>
-                            <td className="px-4 py-2 text-right text-gray-300">{bet.stake.toFixed(2)}</td>
-                            <td className={`px-4 py-2 text-right font-medium ${bet.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                              {bet.profit >= 0 ? '+' : ''}{bet.profit.toFixed(2)}
+                            <td className="px-4 py-2 text-right text-white">{formatFixed(bet.odds)}</td>
+                            <td className="px-4 py-2 text-right text-gray-300">{formatFixed(bet.stake)}</td>
+                            <td className={`px-4 py-2 text-right font-medium ${toSafeNumber(bet.profit) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {toSafeNumber(bet.profit) >= 0 ? '+' : ''}{formatFixed(bet.profit)}
                             </td>
-                            <td className="px-4 py-2 text-right text-white">{bet.bankrollAfter.toFixed(2)}</td>
+                            <td className="px-4 py-2 text-right text-white">{formatFixed(bet.bankrollAfter)}</td>
                             <td className="px-4 py-2 text-center">
                               <StatusBadge status={bet.status} />
                             </td>
                           </tr>
                         ))}
+                        {!isLoadingBets && simulationBets.length === 0 && (
+                          <tr>
+                            <td className="px-4 py-3 text-gray-400" colSpan={8}>Sem apostas nesta pagina</td>
+                          </tr>
+                        )}
+                        {isLoadingBets && (
+                          <tr>
+                            <td className="px-4 py-3 text-gray-400" colSpan={8}>Carregando apostas...</td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </CardBody>
+                  <div className="flex items-center justify-between px-3 py-2 border-t border-gray-700 bg-gray-800/60">
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="bets-page-size" className="text-xs text-gray-400">linhas</label>
+                      <select
+                        id="bets-page-size"
+                        value={betsPageSize}
+                        onChange={(e) => {
+                          const next = Number(e.target.value) || 100
+                          setBetsPageSize(next)
+                          setBetsPage(1)
+                          if (selected) {
+                            void loadSimulationBetsPage(selected.id, 1, next)
+                          }
+                        }}
+                        className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white"
+                      >
+                        {BETS_PAGE_SIZE_OPTIONS.map((size) => (
+                          <option key={size} value={size}>{size}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selected) void loadSimulationBetsPage(selected.id, Math.max(1, betsPage - 1), betsPageSize)
+                      }}
+                      disabled={betsPage <= 1 || isLoadingBets}
+                      className="px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-200 disabled:opacity-40"
+                    >
+                      Anterior
+                    </button>
+                    <span className="text-xs text-gray-400 text-center">
+                      Pagina {betsPage} de {betsTotalPages} ({betsTotal})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selected) void loadSimulationBetsPage(selected.id, Math.min(betsTotalPages, betsPage + 1), betsPageSize)
+                      }}
+                      disabled={betsPage >= betsTotalPages || isLoadingBets}
+                      className="px-2.5 py-1 text-xs rounded bg-gray-700 text-gray-200 disabled:opacity-40"
+                    >
+                      Proxima
+                    </button>
+                  </div>
                 </Card>
               )}
             </>

@@ -237,6 +237,7 @@ export interface ValueBet {
   market: Market
   outcome: string
   bookmaker: string
+  bookmakerUrl?: string
   bookmakerOdds: number
   modelProbability: number
   impliedProbability: number
@@ -399,6 +400,7 @@ export interface SimulationBet {
   market: string
   outcome: string
   bookmaker: string
+  bookmakerUrl?: string
   odds: number
   modelProbability: number
   value: number

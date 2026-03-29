@@ -50,6 +50,7 @@ type BackendValueBet = {
   market: string
   outcome: string
   bookmaker: string
+  bookmakerUrl?: string
   bookmakerOdds: number
   modelProbability: number
   impliedProbability: number
@@ -219,6 +220,10 @@ function normalizeSimulation(sim: BackendSimulation): Simulation {
       market: String(pickFirst(sources, ['market']) ?? ''),
       outcome: String(pickFirst(sources, ['outcome', 'selection']) ?? ''),
       bookmaker: String(pickFirst(sources, ['bookmaker']) ?? ''),
+      bookmakerUrl: (() => {
+        const url = pickFirst(sources, ['bookmakerUrl', 'bookmaker_url'])
+        return typeof url === 'string' ? url : undefined
+      })(),
       odds: toNumber(pickFirst(sources, ['odds', 'bookmakerOdds', 'bookmaker_odds', 'decimalOdds'])),
       modelProbability: toNumber(pickFirst(sources, ['modelProbability', 'model_probability', 'probability'])),
       value: toNumber(pickFirst(sources, ['value', 'valueScore', 'value_score'])),
@@ -724,6 +729,9 @@ export const simulatorApi = {
 
   getSimulationChart: (id: string) =>
     api.get<SimulationChartPoint[]>(`/simulator/${id}/chart`).then((r) => r.data),
+
+  refreshSimulation: (id: string) =>
+    api.post<{ refreshed: number; currentBankroll?: number; message?: string }>(`/simulator/${id}/refresh`).then((r) => r.data),
 }
 
 // Data ingestion API

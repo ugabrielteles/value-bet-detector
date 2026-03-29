@@ -11,6 +11,9 @@ export class OddsHistory {
   @Prop({ required: true })
   bookmaker: string;
 
+  @Prop()
+  bookmakerUrl: string;
+
   @Prop({ default: '1X2' })
   market: string;
 

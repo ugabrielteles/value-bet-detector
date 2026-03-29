@@ -88,7 +88,12 @@ export class PredictionOpportunitiesRepository {
 
   async findLatestLive(limit = 50, filters: LiveOpportunityFilters = {}): Promise<PredictionOpportunity[]> {
     const cap = Math.max(1, Math.min(limit, 200));
-    const query: Record<string, unknown> = { matchStatus: 'live' };
+    const recentWindowMs = 8 * 60 * 60 * 1000;
+    const query: Record<string, unknown> = {
+      matchStatus: 'live',
+      result: 'pending',
+      generatedAt: { $gte: new Date(Date.now() - recentWindowMs) },
+    };
 
     if (filters.internationalOnly) {
       query.isInternational = true;

@@ -107,6 +107,21 @@ export class ApiFootballAdapter implements BookmakerAdapter {
     throw lastError;
   }
 
+  /**
+   * Returns all fixtures that are currently in progress (live=all).
+   * Used to keep match statuses up to date without waiting for the
+   * full 30-minute odds ingestion cycle.
+   */
+  async fetchLiveFixtures(): Promise<unknown[]> {
+    const params: Record<string, string> = { live: 'all' };
+    return this.withRetry('/fixtures', params, async () => {
+      const response = await this.client.get('/fixtures', { params });
+      this.ensureApiPayloadIsValid('/fixtures', response);
+      this.logSuccess('/fixtures', params, response);
+      return response.data?.response ?? [];
+    });
+  }
+
   async fetchFixtures(leagueId: string, date: string): Promise<unknown[]> {
     const params = { league: leagueId, date, season: this.deriveSeason(date, leagueId) };
     return this.withRetry('/fixtures', params, async () => {
@@ -119,33 +134,17 @@ export class ApiFootballAdapter implements BookmakerAdapter {
 
   /**
    * Fetches all fixtures worldwide for a given date (no league filter).
-   * Returns results page by page (API-Football paginates at 100 items).
+   * API-Football currently rejects the "page" param on /fixtures, so this
+   * uses a single date query and returns whatever the API responds for that day.
    */
   async fetchFixturesByDate(date: string): Promise<unknown[]> {
-    const allFixtures: unknown[] = [];
-    let page = 1;
-
-    while (true) {
-      const params: Record<string, string> = { date, page: String(page) };
-      const results = await this.withRetry('/fixtures', params, async () => {
-        const response = await this.client.get('/fixtures', { params });
-        this.ensureApiPayloadIsValid('/fixtures', response);
-        this.logSuccess('/fixtures', params, response);
-        return response.data as { response: unknown[]; paging?: { current: number; total: number } };
-      });
-
-      const items: unknown[] = (results as any).response ?? [];
-      allFixtures.push(...items);
-
-      const paging = (results as any).paging;
-      if (!paging || paging.current >= paging.total || items.length === 0) break;
-
-      page += 1;
-      // Small delay between pages to stay within rate limits
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-
-    return allFixtures;
+    const params: Record<string, string> = { date };
+    return this.withRetry('/fixtures', params, async () => {
+      const response = await this.client.get('/fixtures', { params });
+      this.ensureApiPayloadIsValid('/fixtures', response);
+      this.logSuccess('/fixtures', params, response);
+      return response.data?.response ?? [];
+    });
   }
 
   /**

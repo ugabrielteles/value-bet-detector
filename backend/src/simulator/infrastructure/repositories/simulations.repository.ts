@@ -335,6 +335,21 @@ export class SimulationsRepository {
     };
   }
 
+  /**
+   * Returns lightweight { id, userId } projections for all simulations that
+   * still contain at least one bet with status='pending'. Used by the
+   * auto-refresh cron to avoid loading full bets arrays.
+   */
+  async findAllWithPendingBets(): Promise<Array<{ id: string; userId: string }>> {
+    const docs = await this.simulationModel
+      .find({ 'bets.status': 'pending' })
+      .select({ _id: 1, userId: 1 })
+      .lean<Array<{ _id: Types.ObjectId; userId: string }>>()
+      .exec();
+
+    return docs.map((d) => ({ id: String(d._id), userId: d.userId }));
+  }
+
   async countByUserId(userId: string): Promise<number> {
     return this.simulationModel.countDocuments({ userId }).exec();
   }

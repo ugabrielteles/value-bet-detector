@@ -17,6 +17,7 @@ export class ValueBetsRepository {
     entity.matchId = doc.matchId?.toString();
     entity.predictionId = doc.predictionId?.toString();
     entity.bookmaker = doc.bookmaker;
+    entity.bookmakerUrl = doc.bookmakerUrl;
     entity.market = doc.market;
     entity.outcome = doc.outcome;
     entity.modelProbability = doc.modelProbability;

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Card, CardBody } from '../ui/Card'
 import { CategoryBadge, StatusBadge } from '../ui/Badge'
 import type { ValueBet } from '../../types'
+import { getBookmakerLink } from '../../services/bookmakerLinks'
 
 interface ValueBetCardProps {
   bet: ValueBet
@@ -21,6 +22,7 @@ export function ValueBetCard({ bet }: ValueBetCardProps) {
   const { match } = bet
   const detectedDate = new Date(bet.detectedAt)
   const valuePct = (bet.valueScore ?? bet.value ?? 0) * 100
+  const bookmakerLink = getBookmakerLink(bet.bookmaker, bet.bookmakerUrl)
 
   return (
     <Card className="hover:border-gray-600 transition-colors">
@@ -78,7 +80,20 @@ export function ValueBetCard({ bet }: ValueBetCardProps) {
             <StatusBadge status={bet.status} />
           </div>
           <div className="text-right">
-            <div className="text-xs text-gray-400">{bet.bookmaker}</div>
+            <div className="text-xs text-gray-400">
+              {bookmakerLink ? (
+                <a
+                  href={bookmakerLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-400 hover:text-blue-300"
+                >
+                  {bet.bookmaker}
+                </a>
+              ) : (
+                bet.bookmaker
+              )}
+            </div>
             <div className="text-xs text-gray-500">
               {detectedDate.toLocaleDateString()} {detectedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>

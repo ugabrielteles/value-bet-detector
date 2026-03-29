@@ -7,6 +7,7 @@ import { Select } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
 import { Link } from 'react-router-dom'
+import { getBookmakerLink } from '../services/bookmakerLinks'
 
 type SortKey = 'valueScore' | 'bookmakerOdds' | 'detectedAt'
 
@@ -123,11 +124,13 @@ export default function Alerts() {
         </div>
       ) : (
         <div className="space-y-2">
-          {sorted.map((bet) => (
-            <div
-              key={bet.id}
-              className="bg-gray-800 border border-gray-700 hover:border-gray-600 rounded-xl p-4 transition-colors"
-            >
+          {sorted.map((bet) => {
+            const bookmakerLink = getBookmakerLink(bet.bookmaker, bet.bookmakerUrl)
+            return (
+              <div
+                key={bet.id}
+                className="bg-gray-800 border border-gray-700 hover:border-gray-600 rounded-xl p-4 transition-colors"
+              >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <Link
@@ -137,7 +140,20 @@ export default function Alerts() {
                     {bet.match?.homeTeam?.name ?? 'Home Team'} vs {bet.match?.awayTeam?.name ?? 'Away Team'}
                   </Link>
                   <div className="text-xs text-gray-400 mt-0.5">
-                    {bet.match?.league?.name ?? 'Unknown League'} · {bet.market} · {bet.outcome} · {bet.bookmaker}
+                    {bet.match?.league?.name ?? 'Unknown League'} · {bet.market} · {bet.outcome} · {
+                      bookmakerLink ? (
+                        <a
+                          href={bookmakerLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-400 hover:text-blue-300"
+                        >
+                          {bet.bookmaker}
+                        </a>
+                      ) : (
+                        bet.bookmaker
+                      )
+                    }
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -150,8 +166,9 @@ export default function Alerts() {
               <div className="text-xs text-gray-500 mt-2">
                 Detected {new Date(bet.detectedAt).toLocaleString()}
               </div>
-            </div>
-          ))}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

@@ -14,6 +14,9 @@ export class ValueBet {
   @Prop({ required: true })
   bookmaker: string;
 
+  @Prop()
+  bookmakerUrl: string;
+
   @Prop({ required: true })
   market: string;
 

@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { SimulationsRepository } from './infrastructure/repositories/simulations.repository';
 import { ValueBetsRepository } from '../value-bets/infrastructure/repositories/value-bets.repository';
 import { SimulationEntity, SimulationBetEntity } from './domain/entities/simulation.entity';
@@ -297,6 +298,7 @@ export class SimulatorService {
             market: vb.market,
             outcome: vb.outcome,
             bookmaker: vb.bookmaker,
+            bookmakerUrl: vb.bookmakerUrl,
             odds: vb.bookmakerOdds,
             modelProbability: vb.modelProbability,
             value: vb.value,
@@ -361,6 +363,101 @@ export class SimulatorService {
       page: safePage,
       limit: safeLimit,
     };
+  }
+
+  private readonly logger = new Logger(SimulatorService.name);
+
+  /**
+   * Re-evaluates every pending bet in an existing simulation against the
+   * current match results. Recomputes profit and bankrollAfter chronologically
+   * and persists the updated bets + currentBankroll.
+   * Returns the updated simulation summary.
+   */
+  async refreshSimulation(id: string, userId: string): Promise<Record<string, unknown>> {
+    const owner = await this.simulationsRepository.findOwnerById(id);
+    if (!owner || owner.userId !== userId) throw new NotFoundException('Simulation not found');
+
+    const sim = await this.simulationsRepository.findById(id);
+    if (!sim) throw new NotFoundException('Simulation not found');
+
+    const pendingBets = sim.bets.filter((b) => b.status === 'pending');
+    if (pendingBets.length === 0) return { refreshed: 0, message: 'No pending bets to refresh' };
+
+    const matchCache = new Map<string, MatchEntity | null>();
+    // Build a lookup from valueBetId to ValueBetEntity for pending bets
+    const allValueBets = await this.valueBetsRepository.findAll();
+    const valueBetMap = new Map<string, ValueBetEntity>();
+    for (const vb of allValueBets) valueBetMap.set(vb.id, vb);
+
+    let anyChanged = false;
+    const updatedBets = [...sim.bets];
+
+    for (let i = 0; i < updatedBets.length; i++) {
+      const simBet = updatedBets[i];
+      if (simBet.status !== 'pending') continue;
+
+      const vb = valueBetMap.get(simBet.valueBetId);
+      if (!vb) continue;
+
+      const resolved = await this.resolvePendingStatus(vb, matchCache);
+      if (resolved === 'pending') continue;
+
+      // Recompute profit based on resolved status
+      let profit: number;
+      if (resolved === 'won') {
+        profit = simBet.stake * (simBet.odds - 1);
+      } else if (resolved === 'lost') {
+        profit = -simBet.stake;
+      } else {
+        profit = 0; // void
+      }
+
+      updatedBets[i] = Object.assign(new SimulationBetEntity(), { ...simBet, status: resolved, profit });
+      anyChanged = true;
+    }
+
+    if (!anyChanged) return { refreshed: 0, message: 'All pending bets still unresolved' };
+
+    // Recompute bankrollAfter for ALL bets chronologically
+    let currentBankroll = sim.initialBankroll;
+    for (let i = 0; i < updatedBets.length; i++) {
+      const b = updatedBets[i];
+      if (b.status === 'won' || b.status === 'lost') {
+        currentBankroll += b.profit;
+      }
+      updatedBets[i] = Object.assign(new SimulationBetEntity(), { ...updatedBets[i], bankrollAfter: currentBankroll });
+    }
+
+    const refreshedCount = updatedBets.filter((b, i) => b.status !== sim.bets[i]?.status).length;
+    await this.simulationsRepository.update(id, {
+      currentBankroll,
+      bets: updatedBets as unknown,
+    } as unknown);
+
+    this.logger.log(`[refresh] Simulation ${id}: resolved ${refreshedCount} pending bet(s), bankroll ${sim.initialBankroll} → ${currentBankroll.toFixed(2)}`);
+    return { refreshed: refreshedCount, currentBankroll };
+  }
+
+  /**
+   * Every 10 minutes: auto-refresh all simulations that still have pending bets.
+   */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async autoRefreshPendingSimulations(): Promise<void> {
+    try {
+      const allSims = await this.simulationsRepository.findAllWithPendingBets();
+      if (allSims.length === 0) return;
+
+      this.logger.log(`[autoRefresh] Refreshing ${allSims.length} simulation(s) with pending bets`);
+      for (const sim of allSims) {
+        try {
+          await this.refreshSimulation(sim.id, sim.userId);
+        } catch {
+          // non-fatal per simulation
+        }
+      }
+    } catch (err: unknown) {
+      this.logger.error(`[autoRefresh] Failed: ${(err as Error).message}`);
+    }
   }
 
   buildChartData(simulation: SimulationEntity): { index: number; bankroll: number; profit: number; cumulativeProfit: number; stake: number; won: boolean }[] {

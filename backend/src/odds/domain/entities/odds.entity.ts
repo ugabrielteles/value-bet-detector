@@ -2,6 +2,7 @@ export class OddsEntity {
   id: string;
   matchId: string;
   bookmaker: string;
+  bookmakerUrl?: string;
   market: string;
   homeOdds: number;
   drawOdds: number;

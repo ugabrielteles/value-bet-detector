@@ -37,6 +37,7 @@ export class ValueBetsService {
           matchId: prediction.matchId,
           predictionId: prediction.id,
           bookmaker: odds.bookmaker,
+          bookmakerUrl: odds.bookmakerUrl,
           market: mkt.market,
           outcome: mkt.outcome,
           modelProbability: mkt.modelProbability,

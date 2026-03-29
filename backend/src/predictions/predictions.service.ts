@@ -356,12 +356,69 @@ export class PredictionsService {
     const opportunities: BettingOpportunity[] = [];
     const homeScore = match.homeScore ?? 0;
     const awayScore = match.awayScore ?? 0;
+    const totalGoalsNow = homeScore + awayScore;
 
     const favoriteSide: TeamSide = prediction.homeProbability >= prediction.awayProbability ? 'home' : 'away';
+    const favoriteProb = favoriteSide === 'home' ? prediction.homeProbability : prediction.awayProbability;
+    const underdogProb = favoriteSide === 'home' ? prediction.awayProbability : prediction.homeProbability;
+    const probGap = favoriteProb - underdogProb;
+
     const favoriteTrailing =
       (favoriteSide === 'home' && homeScore < awayScore) ||
       (favoriteSide === 'away' && awayScore < homeScore);
+    const favoriteLeading =
+      (favoriteSide === 'home' && homeScore > awayScore) ||
+      (favoriteSide === 'away' && awayScore > homeScore);
 
+    // Always: recommend the model-favored side when the edge is meaningful
+    if (probGap >= 0.08) {
+      const sideLabel = favoriteSide === 'home' ? 'Home Win' : 'Away Win';
+      opportunities.push({
+        market: '1X2',
+        selection: sideLabel,
+        phase: 'live',
+        confidence: this.clamp(favoriteProb + 0.04, 0.5, 0.95),
+        rationale: `Model-favored side has a ${Math.round(probGap * 100)}% probability edge in this live match.`,
+      });
+    }
+
+    // 0-0 match: recommend over 0.5 goals (almost always value when score is blank)
+    if (totalGoalsNow === 0) {
+      const overProb = this.clamp(0.75 + (projectedHome.expectedGoals + projectedAway.expectedGoals - 2.5) * 0.06, 0.6, 0.95);
+      opportunities.push({
+        market: 'Live Goals',
+        selection: 'Over 0.5 Goals',
+        phase: 'live',
+        confidence: overProb,
+        rationale: 'Match is still goalless — high probability of at least one goal based on attacking projections.',
+      });
+    }
+
+    // Open game / goal momentum: over on next line
+    if (totalGoalsNow >= 1) {
+      const line = totalGoalsNow + 0.5;
+      opportunities.push({
+        market: 'Live Goals',
+        selection: `Over ${line} Goals`,
+        phase: 'live',
+        confidence: this.clamp(0.52 + totalGoalsNow * 0.07, 0.5, 0.9),
+        rationale: 'Open game state with goals scored often sustains chance creation and transition play.',
+      });
+    }
+
+    // Corners opportunity based on projected volume (independent of score)
+    const projectedCorners = projectedHome.expectedCorners + projectedAway.expectedCorners;
+    if (projectedCorners >= 8.5) {
+      opportunities.push({
+        market: 'Live Corners',
+        selection: 'Over 8.5 Corners',
+        phase: 'live',
+        confidence: this.clamp(0.52 + (projectedCorners - 8.5) * 0.04, 0.5, 0.9),
+        rationale: 'High combined corner projection supports an over corners entry even in a low-scoring match.',
+      });
+    }
+
+    // Favorite trailing: extra pressure-based opportunities
     if (favoriteTrailing) {
       const sideLabel = favoriteSide === 'home' ? 'Home' : 'Away';
       opportunities.push({
@@ -376,7 +433,7 @@ export class PredictionsService {
         market: 'Race to Corners (Live)',
         selection: `${sideLabel} - Race to Next 3 Corners`,
         phase: 'live',
-        confidence: this.clamp(0.58 + Math.abs(prediction.homeProbability - prediction.awayProbability), 0.55, 0.93),
+        confidence: this.clamp(0.58 + probGap, 0.55, 0.93),
         rationale: 'Trailing favorite often dominates late territorial pressure, valuable for race-to-corners entries.',
       });
 
@@ -389,15 +446,19 @@ export class PredictionsService {
       });
     }
 
-    const totalGoalsNow = homeScore + awayScore;
-    if (totalGoalsNow >= 2) {
-      opportunities.push({
-        market: 'Live Goals',
-        selection: 'Over Live Goal Line',
-        phase: 'live',
-        confidence: this.clamp(0.52 + totalGoalsNow * 0.08, 0.5, 0.9),
-        rationale: 'Open game state with multiple goals often sustains chance creation and transitions.',
-      });
+    // Favorite leading with strong pre-match edge: backing them to win remains value
+    if (favoriteLeading && probGap >= 0.15) {
+      const sideLabel = favoriteSide === 'home' ? 'Home Win' : 'Away Win';
+      // Only push if not already added by the generic block above
+      if (!opportunities.some((o) => o.market === '1X2' && o.selection === sideLabel)) {
+        opportunities.push({
+          market: '1X2',
+          selection: sideLabel,
+          phase: 'live',
+          confidence: this.clamp(favoriteProb + 0.06, 0.55, 0.96),
+          rationale: 'Strong favorite is also leading live — model edge and scoreline align.',
+        });
+      }
     }
 
     return opportunities;
@@ -432,8 +493,15 @@ export class PredictionsService {
       return totalGoals > 2.5 ? 'won' : 'lost';
     }
 
-    if (market === 'Live Goals' && selection === 'Over Live Goal Line') {
-      return totalGoals >= 3 ? 'won' : 'lost';
+    if (market === 'Live Goals') {
+      // Legacy hardcoded selection
+      if (selection === 'Over Live Goal Line') return totalGoals >= 3 ? 'won' : 'lost';
+      // Generic "Over N.5 Goals" / "Over N Goals" selection
+      const lineMatch = selection.match(/^over\s+(\d+(?:\.\d+)?)/i);
+      if (lineMatch) {
+        const line = Number(lineMatch[1]);
+        return totalGoals > line ? 'won' : 'lost';
+      }
     }
 
     if (market === 'Corners') {
@@ -466,6 +534,13 @@ export class PredictionsService {
 
     if (market === 'Live Corners') {
       if (homeCorners === undefined || awayCorners === undefined) return 'pending';
+      const totalCorners = homeCorners + awayCorners;
+      // Generic "Over N.5 Corners" selection
+      const lineMatch = selection.match(/^over\s+(\d+(?:\.\d+)?)\s+corners/i);
+      if (lineMatch) {
+        const line = Number(lineMatch[1]);
+        return totalCorners > line ? 'won' : 'lost';
+      }
       if (selection.startsWith('Home')) {
         return homeCorners >= 5 || homeCorners > awayCorners ? 'won' : 'lost';
       }
@@ -748,7 +823,7 @@ export class PredictionsService {
     } catch {
       // non-fatal: still return whatever is already persisted
     }
-    await this.reconcilePendingOpportunities(400);
+    await this.reconcileLiveOpportunities(2000);
     return this.opportunitiesRepository.findLatestLive(limit, filters);
   }
 

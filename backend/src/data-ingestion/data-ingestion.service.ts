@@ -5,6 +5,7 @@ import { MatchesService } from '../matches/matches.service';
 import { OddsService } from '../odds/odds.service';
 import { PredictionsService } from '../predictions/predictions.service';
 import { ValueBetsService } from '../value-bets/value-bets.service';
+import { resolveBookmakerUrl } from '../shared/utils/bookmaker-links.utils';
 import { IngestionLogRepository } from './infrastructure/repositories/ingestion-log.repository';
 import {
   IngestionProcessType,
@@ -376,6 +377,7 @@ export class DataIngestionService {
       return {
         matchId,
         bookmaker: String(bookmaker?.name ?? 'Unknown'),
+        bookmakerUrl: resolveBookmakerUrl(bookmaker?.name, bookmaker?.id),
         market: '1X2',
         homeOdds,
         drawOdds,
@@ -569,6 +571,44 @@ export class DataIngestionService {
       } catch (error: unknown) {
         this.logger.error(`[${leagueId}] Failed to sync fixtures`, (error as Error).message);
       }
+    }
+  }
+
+  /**
+   * Every minute: fetch currently-live fixtures from the API and upsert their
+   * status in the DB. This eliminates the 30-minute lag between kick-off and
+   * the full odds-ingestion cron, ensuring the live feed sees them immediately.
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async syncLiveMatchStatuses(): Promise<void> {
+    try {
+      this.ensureApiKeyConfigured();
+      const fixtures = await this.apiFootballAdapter.fetchLiveFixtures();
+      if (fixtures.length === 0) return;
+
+      let upserted = 0;
+      for (const fixture of fixtures as any[]) {
+        try {
+          const payload = this.extractMatchPayload(fixture);
+          if (!payload) continue;
+          const existing = await this.matchesService.findByMatchId(payload.matchId);
+          if (existing) {
+            await this.matchesService.update(existing.id, payload);
+          } else {
+            await this.matchesService.create(payload);
+          }
+          upserted += 1;
+        } catch {
+          // individual fixture failures are non-fatal
+        }
+      }
+
+      if (upserted > 0) {
+        this.logger.log(`[syncLive] Updated ${upserted}/${fixtures.length} live match status(es)`);
+      }
+    } catch (err: unknown) {
+      // Don't throw — live sync is best-effort. The 30-min cron is the safety net.
+      this.logger.warn(`[syncLive] Skipped: ${(err as Error).message}`);
     }
   }
 

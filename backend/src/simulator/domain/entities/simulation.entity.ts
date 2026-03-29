@@ -7,6 +7,7 @@ export class SimulationBetEntity {
   market: string;
   outcome: string;
   bookmaker: string;
+  bookmakerUrl?: string;
   odds: number;
   modelProbability: number;
   value: number;

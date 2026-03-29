@@ -6,6 +6,7 @@ export class ValueBetEntity {
   matchId: string;
   predictionId: string;
   bookmaker: string;
+  bookmakerUrl?: string;
   market: string;
   outcome: string;
   modelProbability: number;

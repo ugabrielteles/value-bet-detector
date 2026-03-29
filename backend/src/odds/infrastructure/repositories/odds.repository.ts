@@ -16,6 +16,7 @@ export class OddsRepository {
     entity.id = doc._id.toString();
     entity.matchId = doc.matchId;
     entity.bookmaker = doc.bookmaker;
+    entity.bookmakerUrl = doc.bookmakerUrl;
     entity.market = doc.market;
     entity.homeOdds = doc.homeOdds;
     entity.drawOdds = doc.drawOdds;

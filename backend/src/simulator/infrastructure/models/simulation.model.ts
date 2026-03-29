@@ -9,6 +9,7 @@ const SimulationBetSchema = {
   market: String,
   outcome: String,
   bookmaker: String,
+  bookmakerUrl: String,
   odds: Number,
   modelProbability: Number,
   value: Number,
@@ -76,6 +77,7 @@ export class Simulation {
     market: string;
     outcome: string;
     bookmaker: string;
+    bookmakerUrl?: string;
     odds: number;
     modelProbability: number;
     value: number;

@@ -10,6 +10,7 @@ import { OddsEvolutionChart } from '../components/charts/OddsEvolutionChart'
 import { ProbabilityComparisonChart } from '../components/charts/ProbabilityComparisonChart'
 import { CategoryBadge, StatusBadge } from '../components/ui/Badge'
 import { useI18n } from '../hooks/useI18n'
+import { getBookmakerLink } from '../services/bookmakerLinks'
 
 export default function MatchDetail() {
   const { dict } = useI18n()
@@ -21,6 +22,10 @@ export default function MatchDetail() {
   const [valueBets, setValueBets] = useState<ValueBet[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const getBetBookmakerLink = (bet: ValueBet): string | undefined => {
+    return getBookmakerLink(bet.bookmaker, bet.bookmakerUrl)
+  }
 
   useEffect(() => {
     if (!id) return
@@ -257,7 +262,20 @@ export default function MatchDetail() {
                     <tr key={bet.id} className="border-b border-gray-700 hover:bg-gray-700/30 transition-colors">
                       <td className="px-5 py-3 text-gray-300">{bet.market}</td>
                       <td className="px-5 py-3 text-white font-medium">{bet.outcome}</td>
-                      <td className="px-5 py-3 text-gray-300">{bet.bookmaker}</td>
+                      <td className="px-5 py-3 text-gray-300">
+                        {getBetBookmakerLink(bet) ? (
+                          <a
+                            href={getBetBookmakerLink(bet)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-400 hover:text-blue-300"
+                          >
+                            {bet.bookmaker}
+                          </a>
+                        ) : (
+                          bet.bookmaker
+                        )}
+                      </td>
                       <td className="px-5 py-3 text-right text-white">{bet.bookmakerOdds.toFixed(2)}</td>
                       <td className="px-5 py-3 text-right text-green-400">
                         {(bet.modelProbability * 100).toFixed(1)}%

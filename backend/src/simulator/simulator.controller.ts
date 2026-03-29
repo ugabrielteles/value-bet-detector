@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, UseGuards, Query } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, UseGuards, Query, HttpCode } from '@nestjs/common';
 import { SimulatorService } from './simulator.service';
 import { JwtAuthGuard } from '../shared/guards/jwt-auth.guard';
 import { CurrentUser } from '../shared/decorators/current-user.decorator';
@@ -63,5 +63,11 @@ export class SimulatorController {
   async getChart(@CurrentUser() user: UserEntity, @Param('id') id: string) {
     const sim = await this.simulatorService.getSimulation(id, user.id);
     return this.simulatorService.buildChartData(sim);
+  }
+
+  @Post(':id/refresh')
+  @HttpCode(200)
+  async refreshSimulation(@CurrentUser() user: UserEntity, @Param('id') id: string) {
+    return this.simulatorService.refreshSimulation(id, user.id);
   }
 }

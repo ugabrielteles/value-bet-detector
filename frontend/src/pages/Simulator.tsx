@@ -11,6 +11,7 @@ import { Input, Select } from '../components/ui/Input'
 import { Spinner } from '../components/ui/Spinner'
 import { StatusBadge } from '../components/ui/Badge'
 import { useI18n } from '../hooks/useI18n'
+import { getBookmakerLink } from '../services/bookmakerLinks'
 
 interface MetricCardProps { label: string; value: string; positive?: boolean; negative?: boolean }
 function MetricCard({ label, value, positive, negative }: MetricCardProps) {
@@ -34,6 +35,10 @@ function formatFixed(value: unknown, digits = 2): string {
   return toSafeNumber(value).toFixed(digits)
 }
 
+function resolveBookmakerLink(bookmaker: string, bookmakerUrl?: string): string | undefined {
+  return getBookmakerLink(bookmaker, bookmakerUrl)
+}
+
 export default function Simulator() {
   const SIMS_PAGE_SIZE_OPTIONS = [20, 50, 100] as const
   const BETS_PAGE_SIZE_OPTIONS = [50, 100, 200] as const
@@ -49,6 +54,7 @@ export default function Simulator() {
   const [isLoadingBets, setIsLoadingBets] = useState(false)
   const [chartData, setChartData] = useState<SimulationChartPoint[]>([])
   const [isRunning, setIsRunning] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoadingSims, setIsLoadingSims] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -218,6 +224,7 @@ export default function Simulator() {
     setBetsPage(1)
     setSimulationBets([])
     setBetsTotal(sim.totalBets ?? 0)
+    setChartData([])
     void loadSimulationBetsPage(sim.id, 1, betsPageSize)
     try {
       const [summarySimulation, chart] = await Promise.all([
@@ -242,6 +249,30 @@ export default function Simulator() {
       setChartData(chart)
     } catch {
       setChartData([])
+    }
+  }
+  const handleRefresh = async () => {
+    if (!selected || isRefreshing) return
+    setIsRefreshing(true)
+    try {
+      await simulatorApi.refreshSimulation(selected.id)
+      // Reload summary + chart after refresh
+      const [summarySimulation, chart] = await Promise.all([
+        simulatorApi.getSimulationSummary(selected.id),
+        simulatorApi.getSimulationChart(selected.id),
+      ])
+      if (activeSimulationRef.current === selected.id) {
+        clearSimulationCache(selected.id)
+        setSelected(summarySimulation)
+        setChartData(chart)
+        setBetsPage(1)
+        void loadSimulationBetsPage(selected.id, 1, betsPageSize)
+        simulationSignatureRef.current.set(selected.id, buildSimulationSignature(summarySimulation))
+      }
+    } catch {
+      // silently ignore
+    } finally {
+      setIsRefreshing(false)
     }
   }
 
@@ -438,9 +469,27 @@ export default function Simulator() {
               {/* Metrics */}
               <div className="flex items-center justify-between mb-1">
                 <h2 className="font-semibold text-white">{selected.name || `Simulation ${selected.id.slice(0, 8)}`}</h2>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${selected.status === 'completed' ? 'bg-green-900/60 text-green-300' : selected.status === 'failed' ? 'bg-red-900/60 text-red-300' : 'bg-yellow-900/60 text-yellow-300'}`}>
-                  {selected.status}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${selected.status === 'completed' ? 'bg-green-900/60 text-green-300' : selected.status === 'failed' ? 'bg-red-900/60 text-red-300' : 'bg-yellow-900/60 text-yellow-300'}`}>
+                    {selected.status}
+                  </span>
+                  {(getPendingCount(selected) > 0 || isRefreshing) && (
+                    <button
+                      type="button"
+                      onClick={() => void handleRefresh()}
+                      disabled={isRefreshing}
+                      className="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-blue-700/60 hover:bg-blue-600/60 text-blue-200 disabled:opacity-50"
+                      title="Re-verificar apostas pendentes"
+                    >
+                      {isRefreshing ? (
+                        <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" strokeWidth="4" className="opacity-25" /><path d="M4 12a8 8 0 018-8" strokeWidth="4" className="opacity-75" /></svg>
+                      ) : (
+                        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      )}
+                      {isRefreshing ? 'Verificando...' : `Verificar apostas (${getPendingCount(selected)})`}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -466,10 +515,13 @@ export default function Simulator() {
               </div>
 
               {/* Bankroll Evolution Chart */}
-              {chartData.length > 0 && (
+              {selected.totalBets > 0 && (
                 <Card>
                   <CardHeader><h3 className="font-semibold text-white">{dict.simulator.bankrollEvolution}</h3></CardHeader>
                   <CardBody>
+                    {chartData.length === 0 ? (
+                      <div className="flex items-center justify-center h-[260px] text-gray-500 text-sm">Carregando gráfico...</div>
+                    ) : (
                     <ResponsiveContainer width="100%" height={260}>
                       <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -484,6 +536,7 @@ export default function Simulator() {
                         <Line type="monotone" dataKey="bankroll" stroke="#3b82f6" strokeWidth={2} dot={false} name="Bankroll" />
                       </LineChart>
                     </ResponsiveContainer>
+                    )}
                   </CardBody>
                 </Card>
               )}
@@ -497,6 +550,7 @@ export default function Simulator() {
                       <thead className="sticky top-0 bg-gray-800">
                         <tr className="border-b border-gray-700 text-gray-400 uppercase">
                           <th className="px-4 py-2 text-left">#</th>
+                          <th className="px-4 py-2 text-left">{dict.matchDetail.bookmaker}</th>
                           <th className="px-4 py-2 text-left">{dict.simulator.market}</th>
                           <th className="px-4 py-2 text-left">{dict.simulator.outcome}</th>
                           <th className="px-4 py-2 text-right">{dict.simulator.odds}</th>
@@ -510,6 +564,20 @@ export default function Simulator() {
                         {simulationBets.map((bet, i) => (
                           <tr key={`${bet.valueBetId || bet.matchId || 'bet'}-${i}`} className="border-b border-gray-700 hover:bg-gray-700/30">
                             <td className="px-4 py-2 text-gray-400">{(betsPage - 1) * betsPageSize + i + 1}</td>
+                            <td className="px-4 py-2 text-gray-300">
+                              {resolveBookmakerLink(bet.bookmaker, bet.bookmakerUrl) ? (
+                                <a
+                                  href={resolveBookmakerLink(bet.bookmaker, bet.bookmakerUrl)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-blue-400 hover:text-blue-300"
+                                >
+                                  {bet.bookmaker || '-'}
+                                </a>
+                              ) : (
+                                bet.bookmaker || '-'
+                              )}
+                            </td>
                             <td className="px-4 py-2 text-gray-300">{bet.market || '-'}</td>
                             <td className="px-4 py-2 text-white">{bet.outcome}</td>
                             <td className="px-4 py-2 text-right text-white">{formatFixed(bet.odds)}</td>
@@ -525,12 +593,12 @@ export default function Simulator() {
                         ))}
                         {!isLoadingBets && simulationBets.length === 0 && (
                           <tr>
-                            <td className="px-4 py-3 text-gray-400" colSpan={8}>Sem apostas nesta pagina</td>
+                            <td className="px-4 py-3 text-gray-400" colSpan={9}>Sem apostas nesta pagina</td>
                           </tr>
                         )}
                         {isLoadingBets && (
                           <tr>
-                            <td className="px-4 py-3 text-gray-400" colSpan={8}>Carregando apostas...</td>
+                            <td className="px-4 py-3 text-gray-400" colSpan={9}>Carregando apostas...</td>
                           </tr>
                         )}
                       </tbody>

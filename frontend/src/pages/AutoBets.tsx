@@ -94,6 +94,7 @@ export default function AutoBets() {
   const [statusFilter, setStatusFilter] = useState<AutoBetStatus>('all')
   const [loading, setLoading] = useState(false)
   const [executing, setExecuting] = useState(false)
+  const [executingBetId, setExecutingBetId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [expandedLog, setExpandedLog] = useState<string | null>(null)
@@ -266,6 +267,7 @@ export default function AutoBets() {
   }, [bets, matchMap])
 
   const handleExecuteAll = async () => {
+    if (executingBetId) return
     setExecuting(true)
     setError(null)
     try {
@@ -282,12 +284,17 @@ export default function AutoBets() {
   }
 
   const handleExecute = async (id: string) => {
+    if (executing || executingBetId) return
+    setExecutingBetId(id)
+    setError(null)
     try {
       await autoBetsApi.execute(id)
       void loadBets()
       void loadAnalytics()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Execution failed')
+    } finally {
+      setExecutingBetId(null)
     }
   }
 
@@ -382,30 +389,10 @@ export default function AutoBets() {
             )}
             <button
               onClick={handleExecuteAll}
-              disabled={executing}
+              disabled={executing || Boolean(executingBetId)}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium"
             >
               {executing ? 'Running…' : 'Execute Queued'}
-            </button>
-            <button
-              onClick={async () => {
-                setExecuting(true)
-                setError(null)
-                try {
-                  const result = await autoBetsApi.executeAll({ includeFailed: true })
-                  alert(`Reprocessed: ${result.executed} | Still failed: ${result.failed}`)
-                  void loadBets()
-                  void loadAnalytics()
-                } catch (e: unknown) {
-                  setError(e instanceof Error ? e.message : 'Reprocess failed')
-                } finally {
-                  setExecuting(false)
-                }
-              }}
-              disabled={executing}
-              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded-lg text-sm font-medium"
-            >
-              {executing ? 'Running…' : 'Reprocess Failed'}
             </button>
           </div>
         </div>
@@ -645,6 +632,8 @@ export default function AutoBets() {
                       setExpandedLog={setExpandedLog}
                       onExecute={handleExecute}
                       onCancel={handleCancel}
+                      executingBetId={executingBetId}
+                      actionsLocked={executing}
                       onResolve={(b) => {
                         setOutcomeModal({ bet: b })
                         setOutcomeForm({ outcome: 'won', winnings: '', betSlipId: '' })
@@ -672,28 +661,6 @@ export default function AutoBets() {
                     {s.charAt(0).toUpperCase() + s.slice(1)}
                   </button>
                 ))}
-                {statusFilter === 'failed' && (
-                  <button
-                    onClick={async () => {
-                      setExecuting(true)
-                      setError(null)
-                      try {
-                        const result = await autoBetsApi.executeAll({ includeFailed: true })
-                        alert(`Reprocessed: ${result.executed} | Still failed: ${result.failed}`)
-                        void loadBets()
-                        void loadAnalytics()
-                      } catch (e: unknown) {
-                        setError(e instanceof Error ? e.message : 'Reprocess failed')
-                      } finally {
-                        setExecuting(false)
-                      }
-                    }}
-                    disabled={executing}
-                    className="px-3 py-1 text-xs rounded-full border border-amber-700 text-amber-300 hover:text-amber-200 disabled:opacity-50"
-                  >
-                    Retry All Failed
-                  </button>
-                )}
               </div>
 
               {loading ? (
@@ -714,6 +681,8 @@ export default function AutoBets() {
                         setExpandedLog={setExpandedLog}
                         onExecute={handleExecute}
                         onCancel={handleCancel}
+                        executingBetId={executingBetId}
+                        actionsLocked={executing}
                         onResolve={(b) => {
                           setOutcomeModal({ bet: b })
                           setOutcomeForm({ outcome: 'won', winnings: '', betSlipId: '' })
@@ -1035,6 +1004,8 @@ function BetRow({
   setExpandedLog,
   onExecute,
   onCancel,
+  executingBetId,
+  actionsLocked,
   onResolve,
 }: {
   bet: AutoBet
@@ -1043,10 +1014,14 @@ function BetRow({
   setExpandedLog: (id: string | null) => void
   onExecute: (id: string) => void
   onCancel: (id: string) => void
+  executingBetId: string | null
+  actionsLocked: boolean
   onResolve: (bet: AutoBet) => void
 }) {
   const statusCls = STATUS_COLORS[bet.status] ?? 'text-gray-400 bg-gray-800'
   const navMode = getAutomationNavigationMode(bet)
+  const isExecutingThisRow = executingBetId === bet.id
+  const disableRowActions = actionsLocked || (executingBetId !== null && !isExecutingThisRow)
 
   return (
     <div className="bg-gray-900 border border-gray-700 rounded-lg p-3">
@@ -1091,7 +1066,7 @@ function BetRow({
             )}
             {bet.betSlipId && <span>Slip: {bet.betSlipId}</span>}
           </div>
-          {bet.automationError && (
+          {bet.automationError && ['failed', 'skipped'].includes(bet.status) && (
             <p className="text-xs text-red-400 mt-1">{bet.automationError}</p>
           )}
           {!bet.bookmakerUrl && (
@@ -1113,21 +1088,33 @@ function BetRow({
             <>
               <button
                 onClick={() => onExecute(bet.id)}
+                disabled={disableRowActions || isExecutingThisRow}
                 className="px-2 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded"
               >
-                Run
+                {isExecutingThisRow ? 'Running…' : 'Run'}
               </button>
               <button
                 onClick={() => onCancel(bet.id)}
-                className="px-2 py-1 text-xs border border-red-800 text-red-400 hover:text-red-300 rounded"
+                disabled={disableRowActions || isExecutingThisRow}
+                className="px-2 py-1 text-xs border border-red-800 text-red-400 hover:text-red-300 rounded disabled:opacity-40"
               >
                 Cancel
               </button>
             </>
           )}
+          {['failed', 'skipped'].includes(bet.status) && (
+            <button
+              onClick={() => onExecute(bet.id)}
+              disabled={disableRowActions || isExecutingThisRow}
+              className="px-2 py-1 text-xs bg-amber-700 hover:bg-amber-600 text-white rounded disabled:opacity-40"
+            >
+              {isExecutingThisRow ? 'Reprocessing…' : 'Reprocessar'}
+            </button>
+          )}
           {['placed', 'queued'].includes(bet.status) && (
             <button
               onClick={() => onResolve(bet)}
+              disabled={disableRowActions || isExecutingThisRow}
               className="px-2 py-1 text-xs bg-green-800 hover:bg-green-700 text-white rounded"
             >
               Resolve

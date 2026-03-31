@@ -102,7 +102,22 @@ export class AutoBetsRepository {
   }
 
   async update(id: string, data: Partial<AutoBetEntity>): Promise<AutoBetEntity | null> {
-    const doc = await this.model.findByIdAndUpdate(id, data, { new: true }).exec();
+    const setPayload: Record<string, unknown> = {};
+    const unsetPayload: Record<string, 1> = {};
+
+    for (const [key, value] of Object.entries(data)) {
+      if (value === undefined) {
+        unsetPayload[key] = 1;
+      } else {
+        setPayload[key] = value;
+      }
+    }
+
+    const updateQuery: Record<string, unknown> = {};
+    if (Object.keys(setPayload).length > 0) updateQuery.$set = setPayload;
+    if (Object.keys(unsetPayload).length > 0) updateQuery.$unset = unsetPayload;
+
+    const doc = await this.model.findByIdAndUpdate(id, updateQuery, { new: true }).exec();
     return doc ? this.toEntity(doc) : null;
   }
 

@@ -147,6 +147,25 @@ export class AutoBetsService {
     return true;
   }
 
+  private isMissingBookmakerEventError(message: string): boolean {
+    const normalized = String(message || '').trim().toLowerCase();
+    if (!normalized) return false;
+
+    return normalized.includes('could not resolve betano event automatically')
+      || normalized.includes('team-search fallback failed')
+      || normalized.includes('event not found at bookmaker')
+      || normalized.includes('match not found at bookmaker');
+  }
+
+  private isUnavailableBookmakerMarketError(message: string): boolean {
+    const normalized = String(message || '').trim().toLowerCase();
+    if (!normalized) return false;
+
+    return normalized.includes('no available betano markets for this event')
+      || normalized.includes('no available betano markets for requested selection')
+      || normalized.includes('there are currently no available markets in this event');
+  }
+
   constructor(
     private readonly autoBetsRepository: AutoBetsRepository,
     private readonly bankrollService: BankrollService,
@@ -347,7 +366,7 @@ export class AutoBetsService {
   async executeBet(userId: string, autoBetId: string): Promise<AutoBetEntity> {
     const autoBet = await this.autoBetsRepository.findByUserAndId(userId, autoBetId);
     if (!autoBet) throw new NotFoundException('Auto-bet not found');
-    if (!['queued', 'failed'].includes(autoBet.status)) {
+    if (!['queued', 'failed', 'skipped'].includes(autoBet.status)) {
       throw new BadRequestException(`Cannot execute bet in status "${autoBet.status}"`);
     }
 
@@ -379,7 +398,7 @@ export class AutoBetsService {
       automationError: undefined,
       automationLog: [
         ...autoBet.automationLog,
-        autoBet.status === 'failed'
+        ['failed', 'skipped'].includes(autoBet.status)
           ? `Retry started at ${new Date().toISOString()}`
           : `Execution started at ${new Date().toISOString()}`,
       ],
@@ -409,24 +428,82 @@ export class AutoBetsService {
       });
     }
 
-    let result: Record<string, unknown>;
-    try {
-      result = await this.betAutomationService.run(userId, {
-        provider,
-        eventUrl: hasDeepEventUrl ? eventUrl : '',
-        selectionText: `${autoBet.market} ${autoBet.outcome}`,
-        stake: autoBet.stakeAmount,
-        dryRun: isDryRun,
-        confirmRealBet: !isDryRun,
-        homeTeamName: match?.homeTeam?.name,
-        awayTeamName: match?.awayTeam?.name,
-      });
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
+    const marketRetryMaxAttempts = provider === 'betano'
+      ? Math.max(1, Number(process.env.AUTO_BETS_MARKET_RETRY_ATTEMPTS || '2'))
+      : 1;
+    const marketRetryDelayMs = Math.max(1000, Number(process.env.AUTO_BETS_MARKET_RETRY_DELAY_MS || '25000'));
+    const retryNotes: string[] = [];
+
+    let result: Record<string, unknown> | undefined;
+    for (let attempt = 1; attempt <= marketRetryMaxAttempts; attempt += 1) {
+      try {
+        result = await this.betAutomationService.run(userId, {
+          provider,
+          eventUrl: hasDeepEventUrl ? eventUrl : '',
+          selectionText: `${autoBet.market} ${autoBet.outcome}`,
+          stake: autoBet.stakeAmount,
+          dryRun: isDryRun,
+          confirmRealBet: !isDryRun,
+          homeTeamName: match?.homeTeam?.name,
+          awayTeamName: match?.awayTeam?.name,
+        });
+        break;
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+
+        if (this.isMissingBookmakerEventError(errMsg)) {
+          return this.autoBetsRepository.update(autoBet.id, {
+            status: 'skipped',
+            automationError: errMsg,
+            automationLog: [
+              ...autoBet.automationLog,
+              ...retryNotes,
+              `REMOVED FROM QUEUE: bookmaker event not found`,
+              `DETAIL: ${errMsg}`,
+            ],
+          });
+        }
+
+        if (this.isUnavailableBookmakerMarketError(errMsg)) {
+          const hasRetryLeft = attempt < marketRetryMaxAttempts;
+          if (hasRetryLeft) {
+            retryNotes.push(
+              `MARKET UNAVAILABLE: attempt ${attempt}/${marketRetryMaxAttempts}`,
+              `DETAIL: ${errMsg}`,
+              `Waiting ${marketRetryDelayMs}ms before retry`,
+            );
+            this.logger.warn(
+              `AutoBet market unavailable [user=${userId}, autoBet=${autoBet.id}]: retry ${attempt}/${marketRetryMaxAttempts} in ${marketRetryDelayMs}ms`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, marketRetryDelayMs));
+            continue;
+          }
+
+          return this.autoBetsRepository.update(autoBet.id, {
+            status: 'skipped',
+            automationError: errMsg,
+            automationLog: [
+              ...autoBet.automationLog,
+              ...retryNotes,
+              `REMOVED FROM QUEUE: bookmaker market unavailable`,
+              `DETAIL: ${errMsg}`,
+            ],
+          });
+        }
+
+        return this.autoBetsRepository.update(autoBet.id, {
+          status: 'failed',
+          automationError: errMsg,
+          automationLog: [...autoBet.automationLog, ...retryNotes, `FAILED: ${errMsg}`],
+        });
+      }
+    }
+
+    if (!result) {
       return this.autoBetsRepository.update(autoBet.id, {
         status: 'failed',
-        automationError: errMsg,
-        automationLog: [...autoBet.automationLog, `FAILED: ${errMsg}`],
+        automationError: 'Automation ended without result',
+        automationLog: [...autoBet.automationLog, ...retryNotes, 'FAILED: Automation ended without result'],
       });
     }
 
@@ -437,8 +514,9 @@ export class AutoBetsService {
     const placed = await this.autoBetsRepository.update(autoBet.id, {
       status: 'placed',
       placedAt: new Date(),
+      automationError: undefined,
       betSlipId: result?.betSlipId as string | undefined,
-      automationLog: [...autoBet.automationLog, ...log, `Placed at ${new Date().toISOString()}`],
+      automationLog: [...autoBet.automationLog, ...retryNotes, ...log, `Placed at ${new Date().toISOString()}`],
     });
 
     this.logger.log(`AutoBet placed: ${autoBet.id} | dryRun=${isDryRun}`);
@@ -484,9 +562,25 @@ export class AutoBetsService {
    */
   @Cron('0 */5 * * * *')
   async executeAllQueued(): Promise<void> {
-    // We can't easily iterate all users here without a users repository.
-    // The controller's executeAllQueued(userId) serves on-demand execution.
-    // This cron is intentionally lightweight; actual per-user execution is triggered via API or polling.
+    const userIds = await this.bankrollService.getUsersWithAutoBetEnabled();
+    if (!userIds.length) return;
+
+    for (const userId of userIds) {
+      try {
+        const queued = await this.autoBetsRepository.findQueuedForUser(userId);
+        if (!queued.length) continue;
+
+        this.logger.log(`AutoBet execute cron: processing ${queued.length} queued bet(s) for user ${userId}`);
+        const result = await this.executeAllQueuedForUser(userId);
+
+        this.logger.log(
+          `AutoBet execute cron: finished for user ${userId} | executed=${result.executed} failed=${result.failed}`,
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`AutoBet execute cron failed for user ${userId}: ${msg}`);
+      }
+    }
   }
 
   /**

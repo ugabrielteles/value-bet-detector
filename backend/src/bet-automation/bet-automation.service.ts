@@ -105,6 +105,298 @@ export class BetAutomationService {
     return false;
   }
 
+  private async clickBetanoEventResultByNormalizedTokens(
+    page: BrowserPage,
+    homeTokens: string[],
+    awayTokens: string[],
+    addStep: (message: string) => void,
+  ): Promise<boolean> {
+    try {
+      const pageWithEval = page as any;
+      if (typeof pageWithEval.evaluate !== 'function') return false;
+
+      const beforeUrl = await this.getPageUrl(page);
+
+      // Step 1: Ensure Eventos accordion is open
+      addStep('[Betano click][accordion] Ensuring Eventos accordion is expanded');
+      const expandedAccordion = await pageWithEval.evaluate(() => {
+        const normalize = (value: string): string => String(value || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase();
+
+        const accordions = Array.from(document.querySelectorAll('.sb-accordion')) as HTMLElement[];
+        
+        // Log for diagnostics
+        (window as any).__debugAccordions = {
+          totalAccordions: accordions.length,
+          titles: accordions.map((a) => (a.querySelector('.sb-accordion__header .sb-accordion__header__title span')?.textContent || '').trim()),
+        };
+
+        const eventsAccordion = accordions.find((accordion) => {
+          const titleText = normalize(
+            accordion.querySelector('.sb-accordion__header .sb-accordion__header__title span')?.textContent || '',
+          ).trim();
+          return titleText === 'eventos' || titleText === 'events';
+        });
+
+        if (!eventsAccordion) return false;
+
+        const header = eventsAccordion.querySelector('.sb-accordion__header') as HTMLElement | null;
+        if (!header) return false;
+
+        // Check if already expanded by verifying body visible or clicking to be safe
+        const body = eventsAccordion.querySelector('.sb-accordion__body') as HTMLElement | null;
+        const isVisible = body && window.getComputedStyle(body).display !== 'none';
+
+        if (!isVisible) {
+          // Click header to expand
+          header.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          const eventInit: MouseEventInit = { bubbles: true, cancelable: true, composed: true };
+          header.dispatchEvent(new MouseEvent('pointerdown', eventInit));
+          header.dispatchEvent(new MouseEvent('click', eventInit));
+          header.dispatchEvent(new MouseEvent('pointerup', eventInit));
+        }
+
+        return true;
+      });
+
+      if (!expandedAccordion) {
+        addStep('[Betano click][accordion] Failed to expand Eventos accordion');
+        try {
+          const debugInfo = await pageWithEval.evaluate(() => (window as any).__debugAccordions);
+          addStep(`[Betano click][accordion] Debug: total accordions=${debugInfo?.totalAccordions}, titles=${JSON.stringify(debugInfo?.titles)}`);
+        } catch {
+          // ignore
+        }
+        return false;
+      }
+
+      addStep('[Betano click][accordion] Eventos accordion expanded/verified');
+      await page.waitForTimeout(300);
+
+      const selectionContext = await pageWithEval.evaluate(
+        ({ rawHomeTokens, rawAwayTokens }) => {
+          const normalize = (value: string): string => String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase();
+
+          document
+            .querySelectorAll('[data-automation-target="betano-event-target"]')
+            .forEach((node) => node.removeAttribute('data-automation-target'));
+
+          const home = (rawHomeTokens || [])
+            .map((token: string) => normalize(token).trim())
+            .filter((token: string) => token.length >= 3)
+            .slice(0, 6);
+          const away = (rawAwayTokens || [])
+            .map((token: string) => normalize(token).trim())
+            .filter((token: string) => token.length >= 3)
+            .slice(0, 6);
+
+          const accordions = Array.from(document.querySelectorAll('.sb-accordion')) as HTMLElement[];
+          const accordionTitles = accordions
+            .map((accordion) => (accordion.querySelector('.sb-accordion__header .sb-accordion__header__title span')?.textContent || '').trim())
+            .filter(Boolean);
+
+          const eventsAccordion = accordions.find((accordion) => {
+            const titleText = normalize(
+              accordion.querySelector('.sb-accordion__header .sb-accordion__header__title span')?.textContent || '',
+            ).trim();
+
+            // Strictly target the "Eventos/Events" accordion title to avoid matching "Mercados" rows.
+            return titleText === 'eventos' || titleText === 'events';
+          });
+
+          if (!eventsAccordion) {
+            return {
+              selectedLabel: '',
+              accordionTitles,
+              hasEventsAccordion: false,
+              eventsRows: 0,
+            };
+          }
+
+          const rows = Array.from(
+            eventsAccordion.querySelectorAll('.sb-accordion__body .search-result[data-qa^="search_result_"]'),
+          ) as HTMLElement[];
+
+          if (!rows.length) {
+            return {
+              selectedLabel: '',
+              accordionTitles,
+              hasEventsAccordion: true,
+              eventsRows: 0,
+            };
+          }
+
+          const scored = rows.map((row) => {
+            const text = normalize(row.textContent || '');
+            const homeHits = home.filter((token: string) => text.includes(token)).length;
+            const awayHits = away.filter((token: string) => text.includes(token)).length;
+            return { row, homeHits, awayHits, score: homeHits + awayHits };
+          });
+
+          const best = scored
+            .filter((entry) => entry.homeHits > 0 && entry.awayHits > 0)
+            .sort((a, b) => b.score - a.score)[0];
+
+          if (best?.row) {
+            best.row.setAttribute('data-automation-target', 'betano-event-target');
+            return {
+              selectedLabel: (best.row.querySelector('.search-result__info__name')?.textContent || '').trim(),
+              accordionTitles,
+              hasEventsAccordion: true,
+              eventsRows: rows.length,
+            };
+          }
+
+          if (rows.length === 1) {
+            rows[0].setAttribute('data-automation-target', 'betano-event-target');
+            return {
+              selectedLabel: (rows[0].querySelector('.search-result__info__name')?.textContent || '').trim(),
+              accordionTitles,
+              hasEventsAccordion: true,
+              eventsRows: rows.length,
+            };
+          }
+
+          return {
+            selectedLabel: '',
+            accordionTitles,
+            hasEventsAccordion: true,
+            eventsRows: rows.length,
+          };
+        },
+        { rawHomeTokens: homeTokens, rawAwayTokens: awayTokens },
+      );
+
+      const accordionTitles = Array.isArray(selectionContext?.accordionTitles)
+        ? selectionContext.accordionTitles.filter(Boolean).join(' | ')
+        : '';
+      addStep(`[Betano click][pre] Accordion titles found: ${accordionTitles || 'none'}`);
+
+      if (!selectionContext?.hasEventsAccordion) {
+        addStep('[Betano click][pre] Eventos accordion not found');
+      } else if (!selectionContext?.eventsRows) {
+        addStep('[Betano click][pre] Eventos accordion found but with 0 rows');
+      } else {
+        addStep(`[Betano click][pre] Found ${selectionContext?.eventsRows} event row(s) in Eventos accordion`);
+      }
+
+      const targetLabel = String(selectionContext?.selectedLabel || '').trim();
+      if (!targetLabel) {
+        addStep(`[Betano click][pre] Warning: Found ${selectionContext?.eventsRows} event row(s) but none matched the team tokens`);
+        return false;
+      }
+
+      addStep(`[Betano click][0/4] Candidate event row selected: ${targetLabel}`);
+
+      const targetSelectors = [
+        `[data-automation-target="betano-event-target"] .search-result__info__name`,
+        `[data-automation-target="betano-event-target"] .search-result__info`,
+        `[data-automation-target="betano-event-target"]`,
+      ];
+
+      for (let index = 0; index < targetSelectors.length; index += 1) {
+        const selector = targetSelectors[index];
+        addStep(`[Betano click][${index + 1}/4] Trying force click selector: ${selector}`);
+        try {
+          await pageWithEval.locator(selector).first().click({ timeout: 1200, force: true });
+          const succeeded = await this.waitBetanoSearchCloseOrNavigate(page, beforeUrl, 1500);
+          if (succeeded) {
+            addStep(`[Betano click][${index + 1}/4] Success: search modal closed after click`);
+            return true;
+          }
+
+          addStep(`[Betano click][${index + 1}/4] Click dispatched but search modal is still open`);
+        } catch {
+          addStep(`[Betano click][${index + 1}/4] Failed to click selector`);
+        }
+      }
+
+      addStep('[Betano click][4/4] Trying DOM pointer/mouse event dispatch fallback');
+      const clickedByEvents = await pageWithEval.evaluate(() => {
+        const row = document.querySelector('[data-automation-target="betano-event-target"]') as HTMLElement | null;
+        if (!row) return false;
+
+        const target = (row.querySelector('.search-result__info__name')
+          || row.querySelector('.search-result__info')
+          || row) as HTMLElement;
+
+        target.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const eventInit: MouseEventInit = { bubbles: true, cancelable: true, composed: true };
+        target.dispatchEvent(new MouseEvent('pointerdown', eventInit));
+        target.dispatchEvent(new MouseEvent('mousedown', eventInit));
+        target.dispatchEvent(new MouseEvent('mouseup', eventInit));
+        target.dispatchEvent(new MouseEvent('click', eventInit));
+        return true;
+      });
+
+      if (!clickedByEvents) {
+        addStep('[Betano click][4/4] Failed: target row not found for DOM event dispatch');
+        return false;
+      }
+
+      const succeeded = await this.waitBetanoSearchCloseOrNavigate(page, beforeUrl, 1500);
+      if (!succeeded) {
+        addStep('[Betano click][4/4] DOM events dispatched but search modal is still open');
+        return false;
+      }
+
+      addStep('[Betano click][4/4] Success: search modal closed after DOM event dispatch');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async isBetanoSearchResultsVisible(page: BrowserPage): Promise<boolean> {
+    try {
+      const pageWithEval = page as any;
+      if (typeof pageWithEval.evaluate !== 'function') return false;
+
+      const visible = await pageWithEval.evaluate(() => {
+        const container = document.querySelector('[data-qa="container_search_results"]') as HTMLElement | null;
+        if (!container) return false;
+        const style = window.getComputedStyle(container);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        return container.offsetParent !== null;
+      });
+
+      return Boolean(visible);
+    } catch {
+      return false;
+    }
+  }
+
+  private async getPageUrl(page: BrowserPage): Promise<string> {
+    try {
+      const pageWithEval = page as any;
+      if (typeof pageWithEval.evaluate !== 'function') return '';
+      return String(await pageWithEval.evaluate(() => window.location.href));
+    } catch {
+      return '';
+    }
+  }
+
+  private async waitBetanoSearchCloseOrNavigate(page: BrowserPage, beforeUrl: string, timeoutMs = 1500): Promise<boolean> {
+    const stepMs = 150;
+    const maxChecks = Math.max(1, Math.floor(timeoutMs / stepMs));
+
+    for (let check = 0; check < maxChecks; check += 1) {
+      await page.waitForTimeout(stepMs);
+      const stillVisible = await this.isBetanoSearchResultsVisible(page);
+      if (!stillVisible) return true;
+
+      const currentUrl = await this.getPageUrl(page);
+      if (beforeUrl && currentUrl && beforeUrl !== currentUrl) return true;
+    }
+
+    return false;
+  }
+
   private async saveDebugArtifacts(page: BrowserPage, executionId: string, stage: string): Promise<{ screenshotPath?: string; htmlPath?: string }> {
     const baseDir = join(process.cwd(), 'tmp', 'automation-debug');
     const stamp = `${executionId}-${stage}-${Date.now()}`;
@@ -136,6 +428,92 @@ export class BetAutomationService {
         || html.includes('landingpages.kaizengaming.com/betano-splash-screen');
     } catch {
       return false;
+    }
+  }
+
+  private async detectBetanoNoMarketsAvailable(page: BrowserPage): Promise<boolean> {
+    const pageWithEval = page as any;
+    if (typeof pageWithEval.evaluate !== 'function') return false;
+
+    try {
+      const result = await pageWithEval.evaluate(() => {
+        const normalize = (value: string): string => String(value || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase();
+
+        const noMarketsNeedles = [
+          'nao existem mercados disponiveis de momento',
+          'there are currently no available markets in this event',
+        ];
+
+        // If there are selectable odds in the DOM, this is not a no-markets scenario.
+        const selectionCount = document.querySelectorAll('[data-qa="event-selection"]').length;
+        const marketCount = document.querySelectorAll('.markets__market, [data-qa="market-row"]').length;
+
+        if (selectionCount > 0 || marketCount > 0) {
+          return { hasNoMarketsVisibleMessage: false, selectionCount, marketCount };
+        }
+
+        const isElementVisible = (element: Element | null): boolean => {
+          if (!element) return false;
+          const el = element as HTMLElement;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          return el.offsetParent !== null;
+        };
+
+        // Check visible text nodes first to avoid false positives from scripts/hidden templates.
+        const visibleContainers = Array.from(document.querySelectorAll('main, section, div, span, p, h1, h2, h3'));
+        const hasNoMarketsVisibleMessage = visibleContainers.some((node) => {
+          if (!isElementVisible(node)) return false;
+          const text = normalize((node as HTMLElement).innerText || node.textContent || '');
+          if (!text) return false;
+          return noMarketsNeedles.some((needle) => text.includes(needle));
+        });
+
+        return { hasNoMarketsVisibleMessage, selectionCount, marketCount };
+      });
+
+      return Boolean(result?.hasNoMarketsVisibleMessage);
+    } catch {
+      return false;
+    }
+  }
+
+  private async isBetanoLoginRequired(page: BrowserPage): Promise<boolean> {
+    try {
+      const pageWithEval = page as any;
+      if (typeof pageWithEval.evaluate !== 'function') return false;
+
+      const required = await pageWithEval.evaluate(() => {
+        const loginButton = document.querySelector('[data-qa="login-button"]') as HTMLElement | null;
+        if (!loginButton) return false;
+
+        const style = window.getComputedStyle(loginButton);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        if (loginButton.offsetParent === null) return false;
+
+        const label = String(loginButton.innerText || loginButton.textContent || '').trim().toLowerCase();
+        return label.includes('entrar') || label.includes('login') || label.includes('iniciar sess');
+      });
+
+      return Boolean(required);
+    } catch {
+      return false;
+    }
+  }
+
+  private async extractPageTitle(page: BrowserPage): Promise<string | null> {
+    if (typeof page.content !== 'function') return null;
+
+    try {
+      const html = await page.content();
+      const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+      const title = String(titleMatch?.[1] || '').replace(/\s+/g, ' ').trim();
+      return title || null;
+    } catch {
+      return null;
     }
   }
 
@@ -198,7 +576,10 @@ export class BetAutomationService {
     if (!normalized) return [];
 
     const stopwords = new Set([
-      'ac', 'ca', 'cd', 'cf', 'fc', 'sc', 'club', 'clube', 'de', 'da', 'do', 'del', 'deportivo', 'atletico', 'athletico',
+      'ac', 'ca', 'cd', 'cf', 'fc', 'sc', 'ud', 'ad',
+      'club', 'clube', 'de', 'da', 'do', 'del',
+      'deportivo', 'municipal', 'asociacion', 'associacion', 'associacao',
+      'atletico', 'athletico',
     ]);
 
     const tokens = normalized
@@ -251,14 +632,89 @@ export class BetAutomationService {
       return output;
     };
 
-    const homeVariants = this.buildTeamSearchVariants(homeTeamName);
-    const awayVariants = this.buildTeamSearchVariants(awayTeamName);
-    const homeShort = homeVariants.slice(0, 4);
-    const awayShort = awayVariants.slice(0, 4);
+    const extractCoreTokens = (teamName: string): string[] => {
+      const stopwords = new Set([
+        'ac', 'ca', 'cd', 'cf', 'fc', 'sc', 'ud', 'ad',
+        'club', 'clube', 'de', 'da', 'do', 'del',
+        'deportivo', 'municipal', 'asociacion', 'associacion', 'associacao',
+        'atletico', 'athletico',
+      ]);
+
+      const tokens = this.normalizeTeamSearchText(teamName)
+        .split(' ')
+        .map((token) => token.trim().toLowerCase())
+        .filter((token) => token.length >= 3 && !stopwords.has(token));
+
+      return uniq(tokens).slice(0, 4);
+    };
+
+    const homeCore = extractCoreTokens(homeTeamName);
+    const awayCore = extractCoreTokens(awayTeamName);
+
+    const buildCompactVariants = (teamName: string, coreTokens: string[]): string[] => {
+      const compactFromCore = [
+        coreTokens.slice(0, 2).join(' '),
+        coreTokens.slice(-2).join(' '),
+        coreTokens[0] || '',
+        coreTokens[coreTokens.length - 1] || '',
+      ];
+
+      const compactFromVariants = this.buildTeamSearchVariants(teamName)
+        .map((value) => value.trim())
+        .filter((value) => {
+          const tokenCount = this.normalizeTeamSearchText(value).split(' ').filter(Boolean).length;
+          return tokenCount > 0 && tokenCount <= 2;
+        });
+
+      return uniq([...compactFromCore, ...compactFromVariants]).slice(0, 4);
+    };
+
+    const homeShort = buildCompactVariants(homeTeamName, homeCore);
+    const awayShort = buildCompactVariants(awayTeamName, awayCore);
+
+    const buildMatchSignatures = (homeTokens: string[], awayTokens: string[]): string[] => {
+      const signatures: string[] = [];
+      const add = (value?: string) => {
+        const normalized = String(value || '').trim();
+        if (!normalized) return;
+        signatures.push(normalized);
+      };
+
+      const awayKey = awayTokens[awayTokens.length - 1] || awayTokens[0] || '';
+      const homeWindows: string[] = [];
+
+      if (homeTokens.length >= 2) {
+        for (let index = 0; index < homeTokens.length - 1; index += 1) {
+          homeWindows.push(`${homeTokens[index]} ${homeTokens[index + 1]}`);
+        }
+      } else if (homeTokens.length === 1) {
+        homeWindows.push(homeTokens[0]);
+      }
+
+      // Canonical matchup signature, e.g. "san carlos grecia".
+      for (const homePart of homeWindows.slice(0, 3)) {
+        if (awayKey) {
+          add(`${homePart} ${awayKey}`);
+          add(`${awayKey} ${homePart}`);
+        }
+      }
+
+      if (homeTokens.length > 0 && awayTokens.length > 0) {
+        add(`${homeTokens.join(' ')} ${awayTokens[awayTokens.length - 1]}`);
+        add(`${homeTokens.slice(-2).join(' ')} ${awayTokens[awayTokens.length - 1]}`);
+      }
+
+      return uniq(signatures);
+    };
+
+    const signatureQueries = buildMatchSignatures(homeCore, awayCore);
 
     const combined: string[] = [
-      `${homeTeamName} ${awayTeamName}`,
-      `${awayTeamName} ${homeTeamName}`,
+      // Prioritize compact matchup signatures based on BOTH teams.
+      ...signatureQueries,
+      ...homeCore.flatMap((h) => awayCore.flatMap((a) => [`${h} ${a}`, `${a} ${h}`])),
+      ...homeCore.flatMap((h) => awayCore.map((a) => `${h} ${a}`)),
+      `${homeCore.join(' ')} ${awayCore.join(' ')}`.trim(),
     ];
 
     for (const homeVariant of homeShort) {
@@ -358,27 +814,27 @@ export class BetAutomationService {
       addStep(`Searching Betano event by teams: ${query}`);
       await page.waitForTimeout(450);
 
+      // Wait for search results to appear
+      try {
+        await (page as any).waitForSelector('[data-qa^="search_result_"]', { timeout: 3000 }).catch(() => {
+          // Results may not appear, continue anyway
+        });
+      } catch {
+        // Ignore timeout
+      }
+
       const directEventTextSelectors = uniq([
         `.search-result[data-qa^="search_result_"]:has(.search-result__info__name:has-text("${home}")):has(.search-result__info__name:has-text("${away}"))`,
         `.search-result[data-qa^="search_result_"]:has(.search-result__info__name:has-text("${away}")):has(.search-result__info__name:has-text("${home}"))`,
         `.search-result:has(.search-result__info__name:has-text("${home}")):has(.search-result__info__name:has-text("${away}"))`,
         `.search-result:has(.search-result__info__name:has-text("${away}")):has(.search-result__info__name:has-text("${home}"))`,
-        `.search-result__info__name:has-text("${home}"):has-text("${away}")`,
-        `.search-result__info__name:has-text("${away}"):has-text("${home}")`,
-        `a:has-text("${home} - ${away}")`,
-        `a:has-text("${away} - ${home}")`,
-        `button:has-text("${home} - ${away}")`,
-        `button:has-text("${away} - ${home}")`,
         `[role="option"]:has-text("${home} - ${away}")`,
         `[role="option"]:has-text("${away} - ${home}")`,
-        `div:has-text("${home} - ${away}")`,
-        `div:has-text("${away} - ${home}")`,
-        `[role="dialog"] div:has-text("${home}"):has-text("${away}")`,
-        `[role="dialog"] div:has-text("${away}"):has-text("${home}")`,
-        `div:has-text("${home}"):has-text("${away}")`,
-        `div:has-text("${away}"):has-text("${home}")`,
+        `.search-result[data-qa^="search_result_"]:has-text("${home} - ${away}")`,
+        `.search-result[data-qa^="search_result_"]:has-text("${away} - ${home}")`,
       ]);
 
+      addStep(`[search] Trying ${directEventTextSelectors.length} direct event selectors (exact team names with :has-text)`);
       const clickedDirectEvent = directEventTextSelectors.length > 0
         ? await this.clickFirstAvailable(page, directEventTextSelectors, 500)
         : false;
@@ -389,74 +845,40 @@ export class BetAutomationService {
         return true;
       }
 
-      const clicked = await this.clickFirstAvailable(page, [
-        `a:has-text("${home}")`,
-        `button:has-text("${home}")`,
-        `a:has-text("${away}")`,
-        `button:has-text("${away}")`,
-        `div:has-text("${home}"):has-text("AO VIVO")`,
-        `div:has-text("${away}"):has-text("AO VIVO")`,
-        `div:has-text("${home}"):has-text(" - ")`,
-        `div:has-text("${away}"):has-text(" - ")`,
-        `a:has-text(" - ")`,
-        `button:has-text(" - ")`,
-        `[role="option"]:has-text(" - ")`,
-        `a:has-text("AO VIVO")`,
-        `button:has-text("AO VIVO")`,
-        `[role="option"]:has-text("AO VIVO")`,
-      ], 700);
-
-      if (!clicked) {
-        const tokenSelectors = uniq([
-          ...homeTokens.flatMap((token) => [
-            `a:has-text("${token}")`,
-            `button:has-text("${token}")`,
-            `[role="option"]:has-text("${token}")`,
+      addStep('[search] Direct selectors failed, trying combined tokens');
+      const combinedTokenSelectors = uniq(
+        homeTokens.slice(0, 4).flatMap((homeToken) =>
+          awayTokens.slice(0, 4).flatMap((awayToken) => [
+            `.search-result[data-qa^="search_result_"]:has(.search-result__info__name:has-text("${homeToken}")):has(.search-result__info__name:has-text("${awayToken}"))`,
+            `.search-result[data-qa^="search_result_"]:has(.search-result__info__name:has-text("${awayToken}")):has(.search-result__info__name:has-text("${homeToken}"))`,
+            `.search-result[data-qa^="search_result_"]:has-text("${homeToken}"):has-text("${awayToken}")`,
+            `.search-result[data-qa^="search_result_"]:has-text("${awayToken}"):has-text("${homeToken}")`,
+            `[role="option"]:has-text("${homeToken}"):has-text("${awayToken}")`,
+            `[role="option"]:has-text("${awayToken}"):has-text("${homeToken}")`,
           ]),
-          ...awayTokens.flatMap((token) => [
-            `a:has-text("${token}")`,
-            `button:has-text("${token}")`,
-            `[role="option"]:has-text("${token}")`,
-          ]),
-        ]);
+        ),
+      );
 
-        const clickedByToken = tokenSelectors.length > 0
-          ? await this.clickFirstAvailable(page, tokenSelectors, 500)
-          : false;
+      addStep(`[search] Trying ${combinedTokenSelectors.length} combined token selectors`);
+      const clickedCombinedTokens = combinedTokenSelectors.length > 0
+        ? await this.clickFirstAvailable(page, combinedTokenSelectors, 500)
+        : false;
 
-        if (clickedByToken) {
-          await page.waitForTimeout(700);
-          addStep('Resolved event by tokenized team search on Betano');
-          return true;
-        }
-      }
-
-      const clickedFirstResult = await this.clickFirstAvailable(page, [
-        '.search-result[data-qa="search_result_0"]',
-        '.search-result[data-qa^="search_result_"]',
-        '.search-result__info__name',
-        '[data-qa*="search-results"] a',
-        '[data-qa*="search-results"] button',
-        '[data-testid*="search-results"] a',
-        '[data-testid*="search-results"] button',
-        '[role="option"] a',
-        '[role="option"] button',
-        '[role="option"]',
-      ], 500);
-
-      if (clickedFirstResult) {
+      if (clickedCombinedTokens) {
         await page.waitForTimeout(700);
-        addStep('Resolved event by clicking first Betano search result');
+        addStep('Resolved event by combined team-token search on Betano');
         return true;
       }
 
-      if (clicked) {
+      addStep('[search] Combined selectors also failed, calling normalized token accordion matching');
+      const clickedEventsAccordion = await this.clickBetanoEventResultByNormalizedTokens(page, homeTokens, awayTokens, addStep);
+      if (clickedEventsAccordion) {
         await page.waitForTimeout(700);
-        addStep('Resolved event by team search on Betano');
+        addStep('Resolved event by normalized token match in Betano Eventos accordion');
         return true;
       }
 
-      addStep(`Betano search returned no clickable result for query: ${query}`);
+      addStep(`Betano search returned no reliable result for query: ${query}`);
     }
 
     return false;
@@ -489,22 +911,36 @@ export class BetAutomationService {
 
     add(normalizedOutcome);
 
-    if (lower.includes('draw')) {
+    const drawIntent = lower.includes('draw')
+      || lower.includes('empate')
+      || /^x$/i.test(raw)
+      || /^1x2\s*x$/i.test(raw)
+      || /\b1x2\b.*\bx\b/i.test(raw);
+
+    const homeIntent = lower.includes('home')
+      || /^1$/i.test(raw)
+      || /^1x2\s*1$/i.test(raw)
+      || /\b1x2\b.*\bhome\b/i.test(raw);
+
+    const awayIntent = lower.includes('away')
+      || /^2$/i.test(raw)
+      || /^1x2\s*2$/i.test(raw)
+      || /\b1x2\b.*\baway\b/i.test(raw);
+
+    if (drawIntent) {
       add('Empate');
       add('Draw');
       add('X');
     }
 
-    if (lower.includes('home')) {
+    if (homeIntent) {
       add(home);
       add('Casa');
-      add('1');
     }
 
-    if (lower.includes('away')) {
+    if (awayIntent) {
       add(away);
       add('Fora');
-      add('2');
     }
 
     const overMatch = lower.match(/over\s*([0-9]+(?:[\.,][0-9]+)?)/i);
@@ -579,6 +1015,132 @@ export class BetAutomationService {
       .replace(/"/g, '\\"');
   }
 
+  private getBetano1x2Outcome(selectionText: string): 'home' | 'draw' | 'away' | null {
+    const raw = String(selectionText || '').trim();
+    const lower = raw.toLowerCase();
+
+    if (
+      lower.includes('draw')
+      || lower.includes('empate')
+      || /^x$/i.test(raw)
+      || /^1x2\s*x$/i.test(raw)
+      || /\b1x2\b.*\bx\b/i.test(raw)
+    ) {
+      return 'draw';
+    }
+
+    if (
+      lower.includes('home')
+      || /^1$/i.test(raw)
+      || /^1x2\s*1$/i.test(raw)
+      || /\b1x2\b.*\bhome\b/i.test(raw)
+    ) {
+      return 'home';
+    }
+
+    if (
+      lower.includes('away')
+      || /^2$/i.test(raw)
+      || /^1x2\s*2$/i.test(raw)
+      || /\b1x2\b.*\baway\b/i.test(raw)
+    ) {
+      return 'away';
+    }
+
+    return null;
+  }
+
+  private async clickBetano1x2Outcome(
+    page: BrowserPage,
+    selectionText: string,
+    homeTeamName: string,
+    awayTeamName: string,
+  ): Promise<string | null> {
+    const outcome = this.getBetano1x2Outcome(selectionText);
+    if (!outcome) return null;
+
+    const pageWithEval = page as any;
+    if (typeof pageWithEval.evaluate !== 'function') return null;
+
+    const clickedLabel = await pageWithEval.evaluate(
+      ({ desiredOutcome, homeName, awayName }) => {
+        const normalize = (value: string): string => String(value || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const isVisible = (element: Element | null): boolean => {
+          if (!element) return false;
+          const el = element as HTMLElement;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          return el.offsetParent !== null;
+        };
+
+        const normalizedHome = normalize(homeName);
+        const normalizedAway = normalize(awayName);
+        const drawTerms = ['empate', 'draw', 'x'];
+
+        const markets = Array.from(document.querySelectorAll('.markets__market')) as HTMLElement[];
+        const targetMarket = markets.find((market) => {
+          const titleNode = market.querySelector('.tw-self-center') as HTMLElement | null;
+          const marketTitle = normalize(titleNode?.innerText || titleNode?.textContent || '');
+
+          const strictResultFinalTitles = new Set([
+            'resultado final',
+            'match result',
+            'full time result',
+          ]);
+
+          if (!strictResultFinalTitles.has(marketTitle)) return false;
+
+          const marketText = normalize(market.textContent || '');
+          if (marketText.includes('proximo gol') || marketText.includes('next goal')) return false;
+          if (marketText.includes('total de gols') || marketText.includes('ambas equipes marcam')) return false;
+
+          return true;
+        });
+
+        if (!targetMarket) return null;
+
+        const selections = Array.from(targetMarket.querySelectorAll('[data-qa="event-selection"]')) as HTMLElement[];
+        const target = selections.find((selection) => {
+          if (!isVisible(selection)) return false;
+          const nameNode = selection.querySelector('.s-name') as HTMLElement | null;
+          const label = normalize(nameNode?.innerText || nameNode?.textContent || selection.innerText || selection.textContent || '');
+          if (!label) return false;
+
+          if (desiredOutcome === 'draw') {
+            return drawTerms.some((term) => label === term || label.includes(` ${term} `) || label.startsWith(`${term} `) || label.endsWith(` ${term}`));
+          }
+
+          if (desiredOutcome === 'home') {
+            return normalizedHome ? label.includes(normalizedHome) : false;
+          }
+
+          return normalizedAway ? label.includes(normalizedAway) : false;
+        });
+
+        if (!target) return null;
+
+        target.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const eventInit: MouseEventInit = { bubbles: true, cancelable: true, composed: true };
+        target.dispatchEvent(new MouseEvent('pointerdown', eventInit));
+        target.dispatchEvent(new MouseEvent('mousedown', eventInit));
+        target.dispatchEvent(new MouseEvent('mouseup', eventInit));
+        target.dispatchEvent(new MouseEvent('click', eventInit));
+
+        const nameNode = target.querySelector('.s-name') as HTMLElement | null;
+        return String(nameNode?.innerText || nameNode?.textContent || '').trim() || 'unknown';
+      },
+      { desiredOutcome: outcome, homeName: homeTeamName, awayName: awayTeamName },
+    );
+
+    return String(clickedLabel || '').trim() || null;
+  }
+
   private async clickBetanoSelection(
     page: BrowserPage,
     selectionText: string,
@@ -591,8 +1153,30 @@ export class BetAutomationService {
 
     addStep(`Trying Betano selection candidates: ${candidates.join(' | ')}`);
 
+    const clicked1x2 = await this.clickBetano1x2Outcome(page, selectionText, homeTeamName, awayTeamName);
+    if (clicked1x2) {
+      addStep(`Selected 1x2 outcome via exact market mapping: ${clicked1x2}`);
+      return true;
+    }
+
+    if (this.getBetano1x2Outcome(selectionText)) {
+      addStep('1x2 intent detected, but strict Resultado Final market mapping failed. Aborting generic fallback to avoid wrong-market selection.');
+      return false;
+    }
+
     if (marketCandidates.length > 0) {
       addStep(`Trying Betano market candidates: ${marketCandidates.join(' | ')}`);
+
+      const marketFilterSelectors = marketCandidates.map((market) => {
+        const escapedMarket = this.escapeSelectorText(market);
+        return `[data-qa="market_filter"]:has-text("${escapedMarket}")`;
+      });
+
+      const focusedMarket = await this.clickFirstAvailable(page, marketFilterSelectors, 500);
+      if (focusedMarket) {
+        addStep('Focused matching Betano market filter before selecting outcome');
+        await page.waitForTimeout(250);
+      }
     }
 
     const directSelectors: string[] = [];
@@ -1197,7 +1781,18 @@ export class BetAutomationService {
       addStep('Cookie/banner handling attempted');
       addStep(`Detected ${this.getSearchTargets(page).length} searchable frame(s)`);
 
-      if (!usingSavedSession) {
+      const loginRequired = await this.isBetanoLoginRequired(page);
+      if (loginRequired) {
+        addStep('Betano login button detected: session is not authenticated');
+      }
+
+      const shouldAutomateLogin = !usingSavedSession || loginRequired;
+
+      if (shouldAutomateLogin) {
+        if (usingSavedSession && loginRequired) {
+          addStep('Saved persistent session exists but is logged out; running login automation');
+        }
+
         // Betano often renders login fields only after opening a login modal/panel.
         const openedLoginPanel = await this.clickFirstAvailable(page, [
           'button:has-text("Entrar")',
@@ -1292,6 +1887,29 @@ export class BetAutomationService {
         if (!resolved) {
           throw new BadRequestException('Could not resolve Betano event automatically (missing deep link and team-search fallback failed)');
         }
+
+        // Wait for the event page to fully load after navigation from search
+        addStep('Waiting for event page to load after search navigation');
+        try {
+          await (page as any).waitForLoadState('networkidle', { timeout: 10000 });
+          addStep('Event page network idle reached');
+        } catch {
+          // Timeout — page may still have loaded enough, continue with fallback wait
+          addStep('Event page networkidle timeout, continuing with fallback wait');
+          await page.waitForTimeout(2500);
+        }
+      }
+
+      if (await this.detectBetanoNoMarketsAvailable(page)) {
+        const pageTitle = await this.extractPageTitle(page);
+        const artifacts = await this.saveDebugArtifacts(page, executionId, 'no-markets-available');
+        const details = [
+          'No available Betano markets for this event',
+          pageTitle ? `eventTitle=${pageTitle}` : undefined,
+          artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
+          artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
+        ].filter(Boolean).join(' | ');
+        throw new BadRequestException(details);
       }
 
       const selected = await this.clickBetanoSelection(
@@ -1303,6 +1921,18 @@ export class BetAutomationService {
       );
 
       if (!selected) {
+        if (await this.detectBetanoNoMarketsAvailable(page)) {
+          const pageTitle = await this.extractPageTitle(page);
+          const artifacts = await this.saveDebugArtifacts(page, executionId, 'no-markets-available');
+          const details = [
+            `No available Betano markets for requested selection (selectionText=${dto.selectionText})`,
+            pageTitle ? `eventTitle=${pageTitle}` : undefined,
+            artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
+            artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
+          ].filter(Boolean).join(' | ');
+          throw new BadRequestException(details);
+        }
+
         const artifacts = await this.saveDebugArtifacts(page, executionId, 'selection-not-found');
         const details = [
           `Could not find target selection on event page (selectionText=${dto.selectionText})`,

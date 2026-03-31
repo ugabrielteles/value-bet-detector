@@ -1,9 +1,10 @@
 import { IsBoolean, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class RunBetanoBetDto {
+	@IsOptional()
 	@IsString()
 	@MaxLength(500)
-	eventUrl: string;
+	eventUrl?: string;
 
 	@IsString()
 	@MaxLength(180)
@@ -20,4 +21,14 @@ export class RunBetanoBetDto {
 	@IsOptional()
 	@IsBoolean()
 	confirmRealBet?: boolean;
+
+	@IsOptional()
+	@IsString()
+	@MaxLength(120)
+	homeTeamName?: string;
+
+	@IsOptional()
+	@IsString()
+	@MaxLength(120)
+	awayTeamName?: string;
 }

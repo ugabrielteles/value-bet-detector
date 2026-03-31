@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Card, CardBody } from '../ui/Card'
 import { CategoryBadge, StatusBadge } from '../ui/Badge'
+import { TeamAvatar } from '../matches/TeamAvatar'
 import type { ValueBet } from '../../types'
 import { getBookmakerLink } from '../../services/bookmakerLinks'
 
@@ -34,9 +35,15 @@ export function ValueBetCard({ bet }: ValueBetCardProps) {
             <span className="text-xs text-gray-500">{match?.league?.country ?? '--'}</span>
           </div>
           <div className="flex items-center justify-center gap-2 text-sm font-semibold group-hover:text-blue-400 transition-colors">
-            <span className="truncate max-w-[100px] text-right">{match?.homeTeam?.name ?? 'Home Team'}</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <TeamAvatar name={match?.homeTeam?.name} logo={match?.homeTeam?.logo} size="sm" />
+              <span className="truncate max-w-[100px] text-right">{match?.homeTeam?.name ?? 'Home Team'}</span>
+            </div>
             <span className="text-gray-500 text-xs shrink-0">vs</span>
-            <span className="truncate max-w-[100px]">{match?.awayTeam?.name ?? 'Away Team'}</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <TeamAvatar name={match?.awayTeam?.name} logo={match?.awayTeam?.logo} size="sm" />
+              <span className="truncate max-w-[100px]">{match?.awayTeam?.name ?? 'Away Team'}</span>
+            </div>
           </div>
           {(match?.homeScore !== undefined && match?.awayScore !== undefined) && (
             <div className="text-center text-sm font-bold text-blue-400 mt-1">

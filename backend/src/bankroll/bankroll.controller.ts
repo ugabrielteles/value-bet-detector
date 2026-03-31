@@ -25,7 +25,8 @@ export class BankrollController {
     @CurrentUser() user: UserEntity,
     @Query('modelProbability') modelProbability: string,
     @Query('decimalOdds') decimalOdds: string,
+    @Query('provider') provider?: string,
   ) {
-    return this.bankrollService.getStakeRecommendation(user.id, +modelProbability, +decimalOdds);
+    return this.bankrollService.getStakeRecommendation(user.id, +modelProbability, +decimalOdds, provider);
   }
 }

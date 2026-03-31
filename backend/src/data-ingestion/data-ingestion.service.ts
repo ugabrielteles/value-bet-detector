@@ -38,6 +38,7 @@ export class DataIngestionService {
   private readonly defaultLeagueId = process.env.API_FOOTBALL_DEFAULT_LEAGUE_ID || '39';
   private readonly defaultWindowDays = Number(process.env.API_FOOTBALL_INGESTION_WINDOW_DAYS || '3');
   private readonly fallbackLookaheadDays = Number(process.env.API_FOOTBALL_FUTURE_LOOKAHEAD_DAYS || '14');
+  private readonly oddsBookmakerFilter = (process.env.INGESTION_BOOKMAKER_FILTER || 'betano').trim().toLowerCase();
 
   /**
    * When true, each ingestion run fetches ALL worldwide fixtures for a given
@@ -273,10 +274,48 @@ export class DataIngestionService {
       if (!match) return;
 
       const prediction = await this.predictionsService.runAndSaveForMatch(match.id);
-      await this.valueBetsService.detectAndSave(prediction, oddsEntity, match.startTime);
+
+      // Value bets must survive into the live phase. Use startTime + 3h so the expiry window
+      // covers the full match duration. If startTime is missing or already past 3h, fall back
+      // to now + 90min to always keep the bet valid for at least a full half.
+      const startMs = match.startTime ? new Date(match.startTime).getTime() : Date.now();
+      const matchExpiresAt = new Date(Math.max(startMs + 3 * 60 * 60 * 1000, Date.now() + 90 * 60 * 1000));
+
+      await this.valueBetsService.detectAndSave(prediction, oddsEntity, matchExpiresAt);
     } catch (err: unknown) {
       this.logger.warn(`[pipeline] match ${matchId}: ${(err as Error).message}`);
     }
+  }
+
+  private async syncLiveOddsPipeline(fixtures: any[]): Promise<{ processed: number; oddsSaved: number; noOdds: number }> {
+    let processed = 0;
+    let oddsSaved = 0;
+    let noOdds = 0;
+
+    for (const fixture of fixtures) {
+      try {
+        const fixtureId = fixture?.fixture?.id;
+        if (!fixtureId) continue;
+
+        const matchId = String(fixtureId);
+        const oddsResponse = await this.apiFootballAdapter.fetchOdds(matchId);
+        const oddsPayload = this.extractOddsPayload(matchId, oddsResponse as any[]);
+
+        if (!oddsPayload) {
+          noOdds += 1;
+          continue;
+        }
+
+        const oddsEntity = await this.oddsService.saveOdds(oddsPayload);
+        await this.runPredictionPipeline(matchId, oddsEntity);
+        oddsSaved += 1;
+        processed += 1;
+      } catch (error: unknown) {
+        this.logger.warn(`[syncLiveOdds] fixture failed: ${(error as Error).message}`);
+      }
+    }
+
+    return { processed, oddsSaved, noOdds };
   }
 
   private ensureApiKeyConfigured(): void {
@@ -330,11 +369,69 @@ export class DataIngestionService {
     };
   }
 
+  private collectCandidateUrls(payload: unknown, output: Set<string>, depth = 0): void {
+    if (depth > 4 || payload === null || payload === undefined) return;
+
+    if (typeof payload === 'string') {
+      const value = payload.trim();
+      if (/^https?:\/\//i.test(value)) output.add(value);
+      return;
+    }
+
+    if (Array.isArray(payload)) {
+      for (const item of payload) this.collectCandidateUrls(item, output, depth + 1);
+      return;
+    }
+
+    if (typeof payload === 'object') {
+      const record = payload as Record<string, unknown>;
+      for (const [key, value] of Object.entries(record)) {
+        if (
+          typeof value === 'string'
+          && /(url|link|href|deep)/i.test(key)
+          && /^https?:\/\//i.test(value.trim())
+        ) {
+          output.add(value.trim());
+        }
+        this.collectCandidateUrls(value, output, depth + 1);
+      }
+    }
+  }
+
+  private isGenericBookmakerPath(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname.toLowerCase().replace(/\/+$/, '') || '/';
+      return path === '/' || path === '/sport' || path === '/sports';
+    } catch {
+      return true;
+    }
+  }
+
+  private extractEventUrlFromPayload(bookmakerName: string, bookmakerId: string | number | undefined, payloads: unknown[]): string | undefined {
+    const candidates = new Set<string>();
+    for (const payload of payloads) {
+      this.collectCandidateUrls(payload, candidates);
+    }
+
+    const preferred = Array.from(candidates).find((url) => !this.isGenericBookmakerPath(url));
+    if (preferred) return preferred;
+
+    return resolveBookmakerUrl(bookmakerName, bookmakerId);
+  }
+
   private extractOddsPayload(matchId: string, oddsResponse: any[]) {
     const bookmakers = oddsResponse?.[0]?.bookmakers;
     if (!Array.isArray(bookmakers) || bookmakers.length === 0) return null;
 
     for (const bookmaker of bookmakers) {
+      const bookmakerName = String(bookmaker?.name ?? 'Unknown');
+
+      // Keep ingestion aligned with currently supported automation provider(s).
+      if (this.oddsBookmakerFilter && !bookmakerName.toLowerCase().includes(this.oddsBookmakerFilter)) {
+        continue;
+      }
+
       const bets = bookmaker?.bets;
       if (!Array.isArray(bets)) continue;
 
@@ -374,10 +471,20 @@ export class DataIngestionService {
         if (under25?.odd) underOdds = Number(under25.odd) || undefined;
       }
 
+      const bookmakerUrl = this.extractEventUrlFromPayload(bookmakerName, bookmaker?.id, [
+        bookmaker,
+        matchWinner,
+        values,
+        home,
+        draw,
+        away,
+        goalsMarket,
+      ]);
+
       return {
         matchId,
-        bookmaker: String(bookmaker?.name ?? 'Unknown'),
-        bookmakerUrl: resolveBookmakerUrl(bookmaker?.name, bookmaker?.id),
+        bookmaker: bookmakerName,
+        bookmakerUrl,
         market: '1X2',
         homeOdds,
         drawOdds,
@@ -609,6 +716,28 @@ export class DataIngestionService {
     } catch (err: unknown) {
       // Don't throw — live sync is best-effort. The 30-min cron is the safety net.
       this.logger.warn(`[syncLive] Skipped: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Every 2 minutes: fetch odds for currently-live fixtures and run the
+   * prediction -> value-bet pipeline so auto-bets can be queued during live play.
+   */
+  @Cron('30 */2 * * * *')
+  async syncLiveOddsAndPipeline(): Promise<void> {
+    try {
+      this.ensureApiKeyConfigured();
+      const fixtures = await this.apiFootballAdapter.fetchLiveFixtures();
+      if (fixtures.length === 0) return;
+
+      const summary = await this.syncLiveOddsPipeline(fixtures as any[]);
+      if (summary.processed > 0 || summary.noOdds > 0) {
+        this.logger.log(
+          `[syncLiveOdds] Processed ${summary.processed}/${fixtures.length} live fixture(s), oddsSaved=${summary.oddsSaved}, noOdds=${summary.noOdds}`,
+        );
+      }
+    } catch (err: unknown) {
+      this.logger.warn(`[syncLiveOdds] Skipped: ${(err as Error).message}`);
     }
   }
 

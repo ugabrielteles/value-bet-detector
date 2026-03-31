@@ -5,6 +5,7 @@ import type { Match, MatchPredictionInsights, OddsHistory, PredictionResult, Val
 import { Spinner } from '../components/ui/Spinner'
 import { Card, CardHeader, CardBody } from '../components/ui/Card'
 import { MatchStats } from '../components/matches/MatchStats'
+import { TeamAvatar } from '../components/matches/TeamAvatar'
 import { ProbabilityBar } from '../components/matches/ProbabilityBar'
 import { OddsEvolutionChart } from '../components/charts/OddsEvolutionChart'
 import { ProbabilityComparisonChart } from '../components/charts/ProbabilityComparisonChart'
@@ -100,6 +101,9 @@ export default function MatchDetail() {
             </div>
             <div className="flex items-center justify-center gap-8">
               <div className="text-center">
+                <div className="flex justify-center mb-2">
+                  <TeamAvatar name={match.homeTeam.name} logo={match.homeTeam.logo} size="lg" />
+                </div>
                 <div className="text-xl font-bold text-white">{match.homeTeam.name}</div>
                 <div className="text-sm text-gray-400">{match.homeTeam.shortName}</div>
               </div>
@@ -120,6 +124,9 @@ export default function MatchDetail() {
                 )}
               </div>
               <div className="text-center">
+                <div className="flex justify-center mb-2">
+                  <TeamAvatar name={match.awayTeam.name} logo={match.awayTeam.logo} size="lg" />
+                </div>
                 <div className="text-xl font-bold text-white">{match.awayTeam.name}</div>
                 <div className="text-sm text-gray-400">{match.awayTeam.shortName}</div>
               </div>
@@ -134,6 +141,8 @@ export default function MatchDetail() {
           stats={match.stats}
           homeTeamName={match.homeTeam.name}
           awayTeamName={match.awayTeam.name}
+          homeTeamLogo={match.homeTeam.logo}
+          awayTeamLogo={match.awayTeam.logo}
         />
       )}
 

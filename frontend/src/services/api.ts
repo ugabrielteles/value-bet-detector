@@ -41,6 +41,9 @@ import type {
   AutomationProviderStatus,
   RunBookmakerAutomationParams,
   AutomationRunResult,
+  AutomationSessionStatus,
+  StartManualAutomationSessionResult,
+  CompleteManualAutomationSessionResult,
   AutoBet,
   AutoBetStatus,
   AutoBetsAnalytics,
@@ -308,14 +311,15 @@ function normalizeSimulation(sim: BackendSimulation): Simulation {
 function normalizeBankroll(bankroll: BackendBankroll): Bankroll {
   const initialBankroll = bankroll.initialBankroll ?? 1000
   const currentBankroll = bankroll.currentBankroll ?? initialBankroll
-  const profitLoss = currentBankroll - initialBankroll
-  const roi = initialBankroll > 0 ? profitLoss / initialBankroll : 0
+  const profitLoss = bankroll.profitLoss ?? (currentBankroll - initialBankroll)
+  const roi = bankroll.roi ?? (initialBankroll > 0 ? profitLoss / initialBankroll : 0)
   const stopLossEnabled = bankroll.stopLossEnabled ?? false
   const stopLossPercentage = bankroll.stopLossPercentage ?? 20
-  const isStopped =
+  const isStopped = bankroll.isStopped ?? (
     stopLossEnabled &&
     initialBankroll > 0 &&
     (initialBankroll - currentBankroll) / initialBankroll >= stopLossPercentage / 100
+  )
 
   return {
     id: bankroll.id ?? '',
@@ -329,11 +333,18 @@ function normalizeBankroll(bankroll: BackendBankroll): Bankroll {
     kellyFraction: bankroll.kellyFraction ?? 0.5,
     stopLossEnabled,
     stopLossPercentage,
-    currency: bankroll.currency ?? 'USD',
+    currency: bankroll.currency ?? 'BRL',
     isActive: bankroll.isActive ?? true,
+    providerBalances: bankroll.providerBalances ?? {},
     profitLoss,
     roi,
     isStopped,
+    autoBetEnabled: bankroll.autoBetEnabled ?? false,
+    autoBetProvider: bankroll.autoBetProvider ?? null,
+    autoBetMinValue: bankroll.autoBetMinValue ?? 5,
+    autoBetMinClassification: bankroll.autoBetMinClassification ?? 'MEDIUM',
+    autoBetMaxDailyBets: bankroll.autoBetMaxDailyBets ?? 10,
+    autoBetDryRun: bankroll.autoBetDryRun ?? true,
     createdAt: bankroll.createdAt ?? new Date().toISOString(),
     updatedAt: bankroll.updatedAt ?? new Date().toISOString(),
   }
@@ -795,6 +806,22 @@ export const betAutomationApi = {
   getProvidersStatus: () =>
     api.get<AutomationProviderStatus[]>('/bet-automation/providers').then((r) => r.data),
 
+  getSessionStatus: (provider: 'betano' | 'bet365') =>
+    api.get<AutomationSessionStatus>(`/bet-automation/session-status/${provider}`).then((r) => r.data),
+
+  startManualSession: (provider: 'betano' | 'bet365') =>
+    api
+      .post<StartManualAutomationSessionResult>('/bet-automation/manual-session/start', { provider })
+      .then((r) => r.data),
+
+  completeManualSession: (sessionId: string) =>
+    api
+      .post<CompleteManualAutomationSessionResult>(`/bet-automation/manual-session/${sessionId}/complete`)
+      .then((r) => r.data),
+
+  clearSessionProfile: (provider: 'betano' | 'bet365') =>
+    api.delete<{ ok: boolean; provider: 'betano' | 'bet365'; cleared: boolean }>(`/bet-automation/session-profile/${provider}`).then((r) => r.data),
+
   run: (params: RunBookmakerAutomationParams) =>
     api.post<AutomationRunResult>('/bet-automation/run', params).then((r) => r.data),
 }
@@ -808,8 +835,12 @@ export const autoBetsApi = {
   getAnalytics: () =>
     api.get<AutoBetsAnalytics>('/auto-bets/analytics').then((r) => r.data),
 
-  executeAll: () =>
-    api.post<{ executed: number; failed: number }>('/auto-bets/execute-all').then((r) => r.data),
+  executeAll: (params?: { includeFailed?: boolean }) =>
+    api
+      .post<{ executed: number; failed: number }>('/auto-bets/execute-all', undefined, {
+        params: params?.includeFailed ? { includeFailed: true } : undefined,
+      })
+      .then((r) => r.data),
 
   execute: (id: string) =>
     api.post<AutoBet>(`/auto-bets/${id}/execute`).then((r) => r.data),

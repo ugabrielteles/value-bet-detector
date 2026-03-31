@@ -83,9 +83,21 @@ export class ValueBetsRepository {
 
   async findSince(since: Date): Promise<ValueBetEntity[]> {
     const docs = await this.valueBetModel
-      .find({ createdAt: { $gte: since }, isActive: true, status: 'pending' })
-      .sort({ createdAt: 1 })
+      .find({ detectedAt: { $gte: since }, isActive: true, status: 'pending' })
+      .sort({ detectedAt: 1 })
       .exec();
     return docs.map((d) => this.toEntity(d));
+  }
+
+  async findExistingActive(
+    matchId: string,
+    market: string,
+    outcome: string,
+    bookmaker: string,
+  ): Promise<ValueBetEntity | null> {
+    const doc = await this.valueBetModel
+      .findOne({ matchId, market, outcome, bookmaker, isActive: true, status: 'pending' })
+      .exec();
+    return doc ? this.toEntity(doc) : null;
   }
 }

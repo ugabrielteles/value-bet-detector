@@ -296,6 +296,7 @@ export interface Bankroll {
   stopLossPercentage: number
   currency: string
   isActive: boolean
+  providerBalances?: Record<string, number>
   profitLoss: number
   roi: number
   isStopped: boolean
@@ -312,6 +313,7 @@ export interface Bankroll {
 
 export interface UpdateBankrollData {
   initialBankroll: number
+  currentBankroll?: number
   minBetPercentage: number
   maxBetPercentage: number
   strategy: BettingStrategy
@@ -546,6 +548,8 @@ export interface AutomationProviderStatus {
   automationAvailable: boolean
   isConfigured: boolean
   hasCredentials: boolean
+  hasSavedSession?: boolean
+  activeManualSession?: boolean
 }
 
 export interface RunBookmakerAutomationParams {
@@ -559,12 +563,45 @@ export interface RunBookmakerAutomationParams {
 
 export interface AutomationRunResult {
   ok: boolean
+  executionId?: string
   provider: BookmakerProvider
   dryRun?: boolean
   canPlaceRealBet?: boolean
   realBetPlaced?: boolean
   reason?: string
+  startedAt?: string
+  finishedAt?: string
+  durationMs?: number
   steps?: string[]
+}
+
+export interface AutomationSessionStatus {
+  provider: Extract<BookmakerProvider, 'betano' | 'bet365'>
+  activeManualSession: boolean
+  activeSessionId?: string
+  startedAt?: string
+  hasSavedSession: boolean
+  sessionDir: string
+}
+
+export interface StartManualAutomationSessionResult {
+  ok: boolean
+  provider: Extract<BookmakerProvider, 'betano' | 'bet365'>
+  sessionId: string
+  alreadyOpen?: boolean
+  startedAt?: string
+  loginUrl: string
+  sessionDir: string
+  instructions: string[]
+}
+
+export interface CompleteManualAutomationSessionResult {
+  ok: boolean
+  provider: Extract<BookmakerProvider, 'betano' | 'bet365'>
+  sessionId: string
+  persisted: boolean
+  sessionDir: string
+  completedAt: string
 }
 
 // ---- Auto-Bets ----
@@ -626,6 +663,8 @@ export interface AutoBetsAnalytics {
   bankrollCurrent: number
   bankrollImpact: number
   stopLossTriggered: boolean
+  todaySuccessfulPlaced: number
+  dailySuccessfulLimit: number
   byBookmaker: Array<{
     bookmaker: string
     totalBets: number

@@ -83,10 +83,22 @@ export class AutoBetsRepository {
     return docs.map((d) => this.toEntity(d));
   }
 
-  async countTodayForUser(userId: string): Promise<number> {
+  async findFailedForUser(userId: string): Promise<AutoBetEntity[]> {
+    const docs = await this.model.find({ userId, status: 'failed' }).sort({ updatedAt: 1 }).exec();
+    return docs.map((d) => this.toEntity(d));
+  }
+
+  async countTodaySuccessfulForUser(userId: string): Promise<number> {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    return this.model.countDocuments({ userId, createdAt: { $gte: startOfDay } }).exec();
+    return this.model.countDocuments({
+      userId,
+      status: { $in: ['placed', 'won', 'lost', 'void'] },
+      $or: [
+        { placedAt: { $gte: startOfDay } },
+        { placedAt: { $exists: false }, createdAt: { $gte: startOfDay } },
+      ],
+    }).exec();
   }
 
   async update(id: string, data: Partial<AutoBetEntity>): Promise<AutoBetEntity | null> {

@@ -33,6 +33,29 @@ export class ValueBetsService {
       if (value > 0) {
         const classification = ProbabilityUtils.classifyValue(value);
         const impliedProbability = ProbabilityUtils.impliedProbability(mkt.bookmakerOdds);
+
+        // Dedup: if an active+pending value bet already exists for this slot, update it
+        // with the latest odds/value rather than creating a duplicate.
+        const existing = await this.valueBetsRepository.findExistingActive(
+          prediction.matchId,
+          mkt.market,
+          mkt.outcome,
+          odds.bookmaker,
+        );
+        if (existing) {
+          const updated = await this.valueBetsRepository.update(existing.id, {
+            modelProbability: mkt.modelProbability,
+            bookmakerOdds: mkt.bookmakerOdds,
+            impliedProbability,
+            value,
+            classification,
+            detectedAt: new Date(),
+            expiresAt: matchExpiresAt,
+          } as any);
+          if (updated) bets.push(updated);
+          continue;
+        }
+
         const bet = await this.valueBetsRepository.create({
           matchId: prediction.matchId,
           predictionId: prediction.id,

@@ -6,6 +6,7 @@ import { CategoryBadge, StatusBadge } from '../components/ui/Badge'
 import { Select } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
+import { TeamAvatar } from '../components/matches/TeamAvatar'
 import { Link } from 'react-router-dom'
 import { getBookmakerLink } from '../services/bookmakerLinks'
 
@@ -135,9 +136,13 @@ export default function Alerts() {
                 <div className="flex-1 min-w-0">
                   <Link
                     to={`/matches/${bet.matchId}`}
-                    className="text-sm font-semibold text-white hover:text-blue-400 transition-colors"
+                    className="flex items-center gap-2 text-sm font-semibold text-white hover:text-blue-400 transition-colors"
                   >
-                    {bet.match?.homeTeam?.name ?? 'Home Team'} vs {bet.match?.awayTeam?.name ?? 'Away Team'}
+                    <TeamAvatar name={bet.match?.homeTeam?.name} logo={bet.match?.homeTeam?.logo} size="sm" />
+                    <span className="truncate">{bet.match?.homeTeam?.name ?? 'Home Team'}</span>
+                    <span className="text-gray-500">vs</span>
+                    <TeamAvatar name={bet.match?.awayTeam?.name} logo={bet.match?.awayTeam?.logo} size="sm" />
+                    <span className="truncate">{bet.match?.awayTeam?.name ?? 'Away Team'}</span>
                   </Link>
                   <div className="text-xs text-gray-400 mt-0.5">
                     {bet.match?.league?.name ?? 'Unknown League'} · {bet.market} · {bet.outcome} · {

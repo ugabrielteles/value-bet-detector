@@ -5,9 +5,10 @@ export class RunBookmakerAutomationDto {
   @IsEnum(['betano', 'bet365', 'betfair', 'bwin', 'unibet', 'other'])
   provider: BookmakerProvider;
 
+  @IsOptional()
   @IsString()
   @MaxLength(500)
-  eventUrl: string;
+  eventUrl?: string;
 
   @IsString()
   @MaxLength(180)
@@ -24,4 +25,14 @@ export class RunBookmakerAutomationDto {
   @IsOptional()
   @IsBoolean()
   confirmRealBet?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  homeTeamName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  awayTeamName?: string;
 }

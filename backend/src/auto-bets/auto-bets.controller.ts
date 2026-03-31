@@ -43,8 +43,13 @@ export class AutoBetsController {
 
   /** Execute all queued bets for the authenticated user */
   @Post('execute-all')
-  executeAll(@CurrentUser() user: UserEntity) {
-    return this.service.executeAllQueuedForUser(user.id);
+  executeAll(
+    @CurrentUser() user: UserEntity,
+    @Query('includeFailed') includeFailed?: string,
+  ) {
+    return this.service.executeAllQueuedForUser(user.id, {
+      includeFailed: includeFailed === 'true',
+    });
   }
 
   /** Execute a single queued bet */

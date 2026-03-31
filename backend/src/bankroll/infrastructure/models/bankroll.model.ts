@@ -35,11 +35,14 @@ export class Bankroll {
   @Prop({ default: 20 })
   stopLossPercentage: number;
 
-  @Prop({ default: 'USD' })
+  @Prop({ default: 'BRL' })
   currency: string;
 
   @Prop({ default: true })
   isActive: boolean;
+
+  @Prop({ type: Map, of: Number, default: {} })
+  providerBalances: Record<string, number>;
 
   // Auto-bet settings
   @Prop({ default: false })

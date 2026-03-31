@@ -12,6 +12,7 @@ import { BetAutomationService } from '../bet-automation/bet-automation.service';
 import { ValueBetsRepository } from '../value-bets/infrastructure/repositories/value-bets.repository';
 import { ValueBetEntity } from '../value-bets/domain/entities/value-bet.entity';
 import { UpdateAutoOutcomeDto } from './application/dtos/update-auto-outcome.dto';
+import { MatchesService } from '../matches/matches.service';
 
 export interface AutoBetsAnalytics {
   // Counters
@@ -35,6 +36,8 @@ export interface AutoBetsAnalytics {
   bankrollCurrent: number;
   bankrollImpact: number;
   stopLossTriggered: boolean;
+  todaySuccessfulPlaced: number;
+  dailySuccessfulLimit: number;
   // Breakdown
   byBookmaker: Array<{
     bookmaker: string;
@@ -66,13 +69,90 @@ export interface AutoBetsAnalytics {
 @Injectable()
 export class AutoBetsService {
   private readonly logger = new Logger(AutoBetsService.name);
-  private lastPollTime = new Date();
+  // Start with a small lookback window so existing recent pending value-bets
+  // can still be enqueued after service restart.
+  private lastPollTime = new Date(Date.now() - 15 * 60 * 1000);
+  private readonly pollLookbackMs = Math.max(
+    5,
+    Number(process.env.AUTO_BETS_POLL_LOOKBACK_MINUTES || '120'),
+  ) * 60 * 1000;
+  private readonly orphanGraceMs = Math.max(
+    5,
+    Number(process.env.AUTO_BETS_ORPHAN_GRACE_MINUTES || '30'),
+  ) * 60 * 1000;
+  private readonly staleScheduledGraceMs = Math.max(
+    15,
+    Number(process.env.AUTO_BETS_SCHEDULED_STALE_MINUTES || '180'),
+  ) * 60 * 1000;
+  private readonly missingMatchLogCooldownMs = 10 * 60 * 1000;
+  private readonly missingMatchLastLogAt = new Map<string, number>();
+  private readonly nonLiveLogCooldownMs = 10 * 60 * 1000;
+  private readonly nonLiveLastLogAt = new Map<string, number>();
+
+  private resolveAutomationProvider(bookmaker: string): 'betano' | 'bet365' | null {
+    const normalized = String(bookmaker || '').trim().toLowerCase();
+    if (normalized.includes('betano')) return 'betano';
+    if (normalized.includes('bet365')) return 'bet365';
+    return null;
+  }
+
+  private hasUsableEventUrl(bookmaker: string, url: string): boolean {
+    const value = String(url || '').trim();
+    if (!value) return false;
+
+    try {
+      const parsed = new URL(value);
+      const host = parsed.hostname.toLowerCase();
+      const path = parsed.pathname.toLowerCase().replace(/\/+$/, '') || '/';
+      const isGenericPath = path === '/' || path === '/sport' || path === '/sports';
+
+      if ((host.includes('betano') || host.includes('bet365')) && isGenericPath) {
+        return false;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async resolveMatch(matchRef: string) {
+    const ref = String(matchRef || '').trim();
+    if (!ref) return null;
+
+    // Newer/legacy records may store either external matchId or Mongo _id.
+    const byExternalId = await this.matchesService.findByMatchId(ref);
+    if (byExternalId) return byExternalId;
+
+    try {
+      return await this.matchesService.findById(ref);
+    } catch {
+      return null;
+    }
+  }
+
+  private shouldLogMissingMatch(key: string): boolean {
+    const now = Date.now();
+    const last = this.missingMatchLastLogAt.get(key) ?? 0;
+    if (now - last < this.missingMatchLogCooldownMs) return false;
+    this.missingMatchLastLogAt.set(key, now);
+    return true;
+  }
+
+  private shouldLogNonLive(key: string): boolean {
+    const now = Date.now();
+    const last = this.nonLiveLastLogAt.get(key) ?? 0;
+    if (now - last < this.nonLiveLogCooldownMs) return false;
+    this.nonLiveLastLogAt.set(key, now);
+    return true;
+  }
 
   constructor(
     private readonly autoBetsRepository: AutoBetsRepository,
     private readonly bankrollService: BankrollService,
     private readonly betAutomationService: BetAutomationService,
     private readonly valueBetsRepository: ValueBetsRepository,
+    private readonly matchesService: MatchesService,
   ) {}
 
   /**
@@ -80,23 +160,105 @@ export class AutoBetsService {
    * Checks bankroll settings and enqueues the bet if automation is on.
    */
   async processNewValueBet(userId: string, valueBet: ValueBetEntity): Promise<AutoBetEntity | null> {
+    const missingMatchKey = `${userId}:${String(valueBet.matchId || '').trim()}`;
+    const match = await this.resolveMatch(valueBet.matchId);
+    if (!match) {
+      const detectedAt = valueBet.detectedAt ? new Date(valueBet.detectedAt).getTime() : Date.now();
+      const isOrphanStale = Date.now() - detectedAt >= this.orphanGraceMs;
+
+      if (isOrphanStale) {
+        await this.valueBetsRepository.update(valueBet.id, { isActive: false });
+        this.logger.warn(
+          `AutoBet orphan cleanup [user=${userId}, valueBet=${valueBet.id}]: match not found (${valueBet.matchId}), deactivated value bet`,
+        );
+        this.missingMatchLastLogAt.delete(missingMatchKey);
+        return null;
+      }
+
+      if (this.shouldLogMissingMatch(missingMatchKey)) {
+        this.logger.debug(
+          `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: match not found (${valueBet.matchId}) - waiting grace window`,
+        );
+      }
+      return null;
+    }
+
+    this.missingMatchLastLogAt.delete(missingMatchKey);
+    const nonLiveKey = `${userId}:${match.status}`;
+
+    if (match.status !== 'live') {
+      if (match.status === 'finished' || match.status === 'cancelled') {
+        await this.valueBetsRepository.update(valueBet.id, { isActive: false });
+        this.logger.warn(
+          `AutoBet stale cleanup [user=${userId}, valueBet=${valueBet.id}]: match status=${match.status}, deactivated value bet`,
+        );
+        this.nonLiveLastLogAt.delete(nonLiveKey);
+        return null;
+      }
+
+      if (match.status === 'scheduled') {
+        const startAt = match.startTime ? new Date(match.startTime).getTime() : NaN;
+        const isStaleScheduled = Number.isFinite(startAt) && (Date.now() - startAt) >= this.staleScheduledGraceMs;
+        if (isStaleScheduled) {
+          await this.valueBetsRepository.update(valueBet.id, { isActive: false });
+          this.logger.warn(
+            `AutoBet stale cleanup [user=${userId}, valueBet=${valueBet.id}]: scheduled match passed grace window, deactivated value bet`,
+          );
+          this.nonLiveLastLogAt.delete(nonLiveKey);
+          return null;
+        }
+      }
+
+      if (this.shouldLogNonLive(nonLiveKey)) {
+        this.logger.debug(
+          `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: match status is ${match.status}, only live is allowed`,
+        );
+      }
+      return null;
+    }
+
+    this.nonLiveLastLogAt.delete(nonLiveKey);
+
     const bankroll = await this.bankrollService.getBankroll(userId);
+    const betProvider = this.resolveAutomationProvider(valueBet.bookmaker) ?? valueBet.bookmaker.toLowerCase().trim();
+    const configuredProvider = String(bankroll.autoBetProvider || '').toLowerCase().trim();
 
     // Auto-bet feature gate
-    if (!bankroll.autoBetEnabled) return null;
-    if (!bankroll.autoBetProvider) return null;
+    if (!bankroll.autoBetEnabled) {
+      this.logger.debug(`AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: autoBetEnabled=false`);
+      return null;
+    }
+    if (!bankroll.autoBetProvider) {
+      this.logger.debug(`AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: autoBetProvider not configured`);
+      return null;
+    }
 
     // Only bet on the configured provider's bookmaker
-    if (bankroll.autoBetProvider !== valueBet.bookmaker.toLowerCase()) return null;
+    if (configuredProvider !== betProvider) {
+      this.logger.debug(
+        `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: provider mismatch configured=${configuredProvider} valueBet=${betProvider}`,
+      );
+      return null;
+    }
 
     // Minimum value edge check
     const valueEdgePct = valueBet.value * 100;
-    if (valueEdgePct < (bankroll.autoBetMinValue ?? 5)) return null;
+    if (valueEdgePct < (bankroll.autoBetMinValue ?? 5)) {
+      this.logger.debug(
+        `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: value edge ${valueEdgePct.toFixed(2)}% < min ${(bankroll.autoBetMinValue ?? 5).toFixed(2)}%`,
+      );
+      return null;
+    }
 
     // Minimum classification check
     const classOrder: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
     const minClass = bankroll.autoBetMinClassification ?? 'LOW';
-    if ((classOrder[valueBet.classification] ?? 0) < (classOrder[minClass] ?? 0)) return null;
+    if ((classOrder[valueBet.classification] ?? 0) < (classOrder[minClass] ?? 0)) {
+      this.logger.debug(
+        `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: classification ${valueBet.classification} < min ${minClass}`,
+      );
+      return null;
+    }
 
     // Stop-loss check
     if (bankroll.isStopped) {
@@ -122,24 +284,33 @@ export class AutoBetsService {
 
     // Daily bet limit check
     const maxDaily = bankroll.autoBetMaxDailyBets ?? 20;
-    const todayCount = await this.autoBetsRepository.countTodayForUser(userId);
+    const todayCount = await this.autoBetsRepository.countTodaySuccessfulForUser(userId);
     if (todayCount >= maxDaily) {
-      this.logger.warn(`AutoBet skipped for user ${userId}: daily limit reached (${todayCount}/${maxDaily})`);
+      this.logger.warn(`AutoBet skipped for user ${userId}: daily successful limit reached (${todayCount}/${maxDaily})`);
       return null;
     }
 
     // Prevent duplicate
     const exists = await this.autoBetsRepository.existsForValueBet(userId, valueBet.id);
-    if (exists) return null;
+    if (exists) {
+      this.logger.debug(`AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: already exists`);
+      return null;
+    }
 
     // Calculate stake
     const stakeRec = await this.bankrollService.getStakeRecommendation(
       userId,
       valueBet.modelProbability,
       valueBet.bookmakerOdds,
+      betProvider,
     );
 
-    if (stakeRec.isStopped || stakeRec.recommendedStake <= 0) return null;
+    if (stakeRec.isStopped || stakeRec.recommendedStake <= 0) {
+      this.logger.debug(
+        `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: invalid stake recommendation (stopped=${stakeRec.isStopped}, stake=${stakeRec.recommendedStake})`,
+      );
+      return null;
+    }
 
     const autoBet = await this.autoBetsRepository.create({
       userId,
@@ -154,12 +325,15 @@ export class AutoBetsService {
       valueEdge: valueBet.value,
       stakeAmount: stakeRec.recommendedStake,
       stakeStrategy: bankroll.strategy,
-      bankrollAtBet: bankroll.currentBankroll,
+      bankrollAtBet: bankroll.providerBalances?.[betProvider] ?? bankroll.currentBankroll,
       status: 'queued',
       automationLog: [
         `Queued at ${new Date().toISOString()}`,
         `Stake: ${stakeRec.recommendedStake.toFixed(2)} (${bankroll.strategy})`,
         `Value edge: ${valueEdgePct.toFixed(2)}%`,
+        !this.hasUsableEventUrl(valueBet.bookmaker, String(valueBet.bookmakerUrl || '').trim())
+          ? 'No deep event URL detected; Betano team-search fallback will be attempted at execution.'
+          : 'Deep event URL detected for direct automation.',
       ],
     });
 
@@ -173,11 +347,24 @@ export class AutoBetsService {
   async executeBet(userId: string, autoBetId: string): Promise<AutoBetEntity> {
     const autoBet = await this.autoBetsRepository.findByUserAndId(userId, autoBetId);
     if (!autoBet) throw new NotFoundException('Auto-bet not found');
-    if (autoBet.status !== 'queued') {
+    if (!['queued', 'failed'].includes(autoBet.status)) {
       throw new BadRequestException(`Cannot execute bet in status "${autoBet.status}"`);
     }
 
     const bankroll = await this.bankrollService.getBankroll(userId);
+
+    const match = await this.resolveMatch(autoBet.matchId);
+    if (!match || match.status !== 'live') {
+      return this.autoBetsRepository.update(autoBet.id, {
+        status: 'skipped',
+        automationError: `Match is not live (status=${match?.status ?? 'not_found'})`,
+        automationLog: [
+          ...autoBet.automationLog,
+          `Execution blocked: match is not live (status=${match?.status ?? 'not_found'})`,
+        ],
+      });
+    }
+
     if (bankroll.isStopped) {
       return this.autoBetsRepository.update(autoBet.id, {
         status: 'skipped',
@@ -189,20 +376,50 @@ export class AutoBetsService {
     // Mark as placing
     await this.autoBetsRepository.update(autoBet.id, {
       status: 'placing',
-      automationLog: [...autoBet.automationLog, `Execution started at ${new Date().toISOString()}`],
+      automationError: undefined,
+      automationLog: [
+        ...autoBet.automationLog,
+        autoBet.status === 'failed'
+          ? `Retry started at ${new Date().toISOString()}`
+          : `Execution started at ${new Date().toISOString()}`,
+      ],
     });
 
     const isDryRun = bankroll.autoBetDryRun !== false;
+    const provider = this.resolveAutomationProvider(autoBet.bookmaker);
+    const eventUrl = String(autoBet.bookmakerUrl || '').trim();
+    const hasDeepEventUrl = this.hasUsableEventUrl(autoBet.bookmaker, eventUrl);
+
+    if (!provider) {
+      return this.autoBetsRepository.update(autoBet.id, {
+        status: 'failed',
+        automationError: `Unsupported automation provider from bookmaker "${autoBet.bookmaker}"`,
+        automationLog: [...autoBet.automationLog, `FAILED: Unsupported automation provider (${autoBet.bookmaker})`],
+      });
+    }
+
+    if (!hasDeepEventUrl && provider !== 'betano') {
+      return this.autoBetsRepository.update(autoBet.id, {
+        status: 'failed',
+        automationError: `Missing deep event URL for ${autoBet.bookmaker}; fallback search is available only for Betano`,
+        automationLog: [
+          ...autoBet.automationLog,
+          `FAILED: Missing deep event URL for ${autoBet.bookmaker}; fallback search is available only for Betano`,
+        ],
+      });
+    }
 
     let result: Record<string, unknown>;
     try {
       result = await this.betAutomationService.run(userId, {
-        provider: autoBet.bookmaker as any,
-        eventUrl: autoBet.bookmakerUrl || '',
+        provider,
+        eventUrl: hasDeepEventUrl ? eventUrl : '',
         selectionText: `${autoBet.market} ${autoBet.outcome}`,
         stake: autoBet.stakeAmount,
         dryRun: isDryRun,
         confirmRealBet: !isDryRun,
+        homeTeamName: match?.homeTeam?.name,
+        awayTeamName: match?.awayTeam?.name,
       });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -237,13 +454,18 @@ export class AutoBetsService {
     const userIds = await this.bankrollService.getUsersWithAutoBetEnabled();
     if (!userIds.length) return;
 
-    const since = this.lastPollTime;
+    // Overlapping lookback prevents missing bets that were detected before
+    // a match turned live (live-only gate would skip them on first pass).
+    const lookbackSince = new Date(Date.now() - this.pollLookbackMs);
+    const since = new Date(Math.min(this.lastPollTime.getTime(), lookbackSince.getTime()));
     this.lastPollTime = new Date();
 
     const recentBets = await this.valueBetsRepository.findSince(since);
     if (!recentBets.length) return;
 
-    this.logger.log(`AutoBet poll: ${recentBets.length} new value bet(s) for ${userIds.length} user(s)`);
+    this.logger.log(
+      `AutoBet poll: ${recentBets.length} pending value bet(s) since ${since.toISOString()} for ${userIds.length} user(s)`,
+    );
 
     for (const userId of userIds) {
       for (const bet of recentBets) {
@@ -270,12 +492,14 @@ export class AutoBetsService {
   /**
    * Execute all queued bets for a specific user.
    */
-  async executeAllQueuedForUser(userId: string): Promise<{ executed: number; failed: number }> {
+  async executeAllQueuedForUser(userId: string, options?: { includeFailed?: boolean }): Promise<{ executed: number; failed: number }> {
     const queued = await this.autoBetsRepository.findQueuedForUser(userId);
+    const failedRows = options?.includeFailed ? await this.autoBetsRepository.findFailedForUser(userId) : [];
+    const batch = [...queued, ...failedRows];
     let executed = 0;
     let failed = 0;
 
-    for (const bet of queued) {
+    for (const bet of batch) {
       try {
         const result = await this.executeBet(userId, bet.id);
         if (result.status === 'placed') executed++;
@@ -311,7 +535,11 @@ export class AutoBetsService {
     }
 
     // Apply to bankroll
-    await this.bankrollService.applyBetResult(userId, actualProfit);
+    await this.bankrollService.applyBetResult(
+      userId,
+      actualProfit,
+      this.resolveAutomationProvider(autoBet.bookmaker) ?? autoBet.bookmaker,
+    );
 
     const resolvedLog = [
       ...autoBet.automationLog,
@@ -354,6 +582,8 @@ export class AutoBetsService {
       this.autoBetsRepository.getAnalytics(userId),
       this.bankrollService.getBankroll(userId),
     ]);
+    const todaySuccessfulPlaced = await this.autoBetsRepository.countTodaySuccessfulForUser(userId);
+    const dailySuccessfulLimit = bankroll.autoBetMaxDailyBets ?? 20;
 
     const statusMap: Record<string, { count: number; totalStaked: number; totalProfit: number }> = {};
     for (const s of raw.byStatus) {
@@ -397,6 +627,8 @@ export class AutoBetsService {
       bankrollCurrent: bankroll.currentBankroll,
       bankrollImpact: bankroll.initialBankroll > 0 ? (totalProfit / bankroll.initialBankroll) * 100 : 0,
       stopLossTriggered: bankroll.isStopped,
+      todaySuccessfulPlaced,
+      dailySuccessfulLimit,
       byBookmaker: raw.byBookmaker.map((b) => ({
         ...b,
         winRate: b.totalBets > 0 ? (b.won / b.totalBets) * 100 : 0,

@@ -12,6 +12,11 @@ export class BankrollRepository {
   ) {}
 
   private toEntity(doc: BankrollDocument): BankrollEntity {
+    const providerBalancesRaw = (doc as any).providerBalances;
+    const providerBalances = providerBalancesRaw instanceof Map
+      ? Object.fromEntries(providerBalancesRaw.entries())
+      : (providerBalancesRaw ?? {});
+
     return new BankrollEntity({
       id: doc._id.toString(),
       userId: doc.userId,
@@ -26,6 +31,7 @@ export class BankrollRepository {
       stopLossPercentage: doc.stopLossPercentage,
       currency: doc.currency,
       isActive: doc.isActive,
+      providerBalances,
       autoBetEnabled: (doc as any).autoBetEnabled ?? false,
       autoBetProvider: (doc as any).autoBetProvider ?? null,
       autoBetMinValue: (doc as any).autoBetMinValue ?? 5,

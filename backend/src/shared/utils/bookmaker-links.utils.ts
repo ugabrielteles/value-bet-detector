@@ -1,5 +1,5 @@
 const BOOKMAKER_URL_BY_ID: Record<string, string> = {
-  '8': 'https://www.bet365.com',
+  '8': 'https://www.bet365.bet.br',
   '11': 'https://www.williamhill.com',
   '16': 'https://www.betsson.com',
   '18': 'https://www.unibet.com',
@@ -7,7 +7,7 @@ const BOOKMAKER_URL_BY_ID: Record<string, string> = {
   '28': 'https://www.betway.com',
   '29': 'https://www.bet9ja.com',
   '30': 'https://www.bwin.com',
-  '33': 'https://www.betano.com',
+  '33': 'https://www.betano.bet.br',
   '36': 'https://www.1xbet.com',
   '41': 'https://www.10bet.com',
   '52': 'https://www.pinnacle.com',
@@ -19,8 +19,8 @@ const BOOKMAKER_URL_BY_ID: Record<string, string> = {
 };
 
 const BOOKMAKER_URL_BY_NAME: Array<{ pattern: RegExp; url: string }> = [
-  { pattern: /bet365/i, url: 'https://www.bet365.com' },
-  { pattern: /betano/i, url: 'https://www.betano.com' },
+  { pattern: /bet365/i, url: 'https://www.bet365.bet.br' },
+  { pattern: /betano/i, url: 'https://www.betano.bet.br' },
   { pattern: /betfair/i, url: 'https://www.betfair.com/sport' },
   { pattern: /betway/i, url: 'https://www.betway.com' },
   { pattern: /bwin/i, url: 'https://www.bwin.com' },

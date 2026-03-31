@@ -1,10 +1,13 @@
 import { Card, CardHeader, CardBody } from '../ui/Card'
+import { TeamAvatar } from './TeamAvatar'
 import type { MatchStats as MatchStatsType } from '../../types'
 
 interface MatchStatsProps {
   stats: MatchStatsType
   homeTeamName: string
   awayTeamName: string
+  homeTeamLogo?: string
+  awayTeamLogo?: string
 }
 
 function FormPill({ result }: { result: string }) {
@@ -31,14 +34,20 @@ function StatRow({ label, home, away }: { label: string; home: string | number |
   )
 }
 
-export function MatchStats({ stats, homeTeamName, awayTeamName }: MatchStatsProps) {
+export function MatchStats({ stats, homeTeamName, awayTeamName, homeTeamLogo, awayTeamLogo }: MatchStatsProps) {
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <span className="font-semibold text-white">{homeTeamName}</span>
+          <span className="font-semibold text-white flex items-center gap-2">
+            <TeamAvatar name={homeTeamName} logo={homeTeamLogo} size="sm" />
+            <span>{homeTeamName}</span>
+          </span>
           <span className="text-xs text-gray-400">Match Stats</span>
-          <span className="font-semibold text-white">{awayTeamName}</span>
+          <span className="font-semibold text-white flex items-center gap-2">
+            <TeamAvatar name={awayTeamName} logo={awayTeamLogo} size="sm" />
+            <span>{awayTeamName}</span>
+          </span>
         </div>
       </CardHeader>
       <CardBody className="p-0 px-5">

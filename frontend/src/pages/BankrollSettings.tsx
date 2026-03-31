@@ -7,6 +7,14 @@ import { Input, Select } from '../components/ui/Input'
 import { Spinner } from '../components/ui/Spinner'
 import { useI18n } from '../hooks/useI18n'
 
+function formatCurrency(value: number, currency: string) {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: currency || 'BRL',
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
 export default function BankrollSettings() {
   const [bankroll, setBankroll] = useState<Bankroll | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -16,7 +24,7 @@ export default function BankrollSettings() {
 
   // Form state
   const [initialBankroll, setInitialBankroll] = useState(1000)
-  const [currency, setCurrency] = useState('USD')
+  const [currency, setCurrency] = useState('BRL')
   const [strategy, setStrategy] = useState<BettingStrategy>('flat')
   const [minBetPct, setMinBetPct] = useState(1)
   const [maxBetPct, setMaxBetPct] = useState(5)
@@ -53,6 +61,7 @@ export default function BankrollSettings() {
     setSuccessMsg(null)
     const data: UpdateBankrollData = {
       initialBankroll,
+      currentBankroll: initialBankroll,
       minBetPercentage: minBetPct,
       maxBetPercentage: maxBetPct,
       strategy,
@@ -99,7 +108,7 @@ export default function BankrollSettings() {
             <CardBody className="py-3">
               <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">{dict.bankroll.current}</div>
               <div className="text-xl font-bold text-white">
-                {bankroll.currency} {bankroll.currentBankroll.toFixed(2)}
+                {formatCurrency(bankroll.currentBankroll, bankroll.currency)}
               </div>
             </CardBody>
           </Card>
@@ -107,7 +116,7 @@ export default function BankrollSettings() {
             <CardBody className="py-3">
               <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">{dict.bankroll.initial}</div>
               <div className="text-xl font-bold text-white">
-                {bankroll.currency} {bankroll.initialBankroll.toFixed(2)}
+                {formatCurrency(bankroll.initialBankroll, bankroll.currency)}
               </div>
             </CardBody>
           </Card>
@@ -115,7 +124,7 @@ export default function BankrollSettings() {
             <CardBody className="py-3">
               <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">P&L</div>
               <div className={`text-xl font-bold ${plColor}`}>
-                {bankroll.profitLoss >= 0 ? '+' : ''}{bankroll.profitLoss.toFixed(2)}
+                {bankroll.profitLoss >= 0 ? '+' : ''}{formatCurrency(Math.abs(bankroll.profitLoss), bankroll.currency)}
               </div>
             </CardBody>
           </Card>
@@ -177,7 +186,7 @@ export default function BankrollSettings() {
               value={currency}
               onChange={(e) => setCurrency(e.target.value)}
             >
-              {['USD', 'EUR', 'GBP', 'BTC', 'ETH'].map((c) => (
+              {['BRL', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'].map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </Select>
@@ -277,7 +286,7 @@ export default function BankrollSettings() {
               />
               <p className="text-xs text-gray-500 mt-2">
                 {dict.bankroll.stopLossHint} {stopLossPct}% {dict.bankroll.fromInitialValue}
-                ({currency} {((1 - stopLossPct / 100) * initialBankroll).toFixed(2)}).
+                ({formatCurrency((1 - stopLossPct / 100) * initialBankroll, currency)}).
               </p>
             </div>
           )}

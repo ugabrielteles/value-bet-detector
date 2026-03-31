@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { UpsertBookmakerCredentialsDto } from './application/dtos/upsert-bookmaker-credentials.dto';
 import { BookmakerCredentialsRepository } from './infrastructure/repositories/bookmaker-credentials.repository';
 import { BookmakerProvider } from './domain/entities/bookmaker-credentials.entity';
@@ -14,11 +19,27 @@ export interface BookmakerCredentialsSafeView {
   hasTwoFactorSecret: boolean;
   updatedAt: Date;
   createdAt: Date;
-}
+} 
 
 @Injectable()
 export class BookmakerCredentialsService {
   constructor(private readonly repository: BookmakerCredentialsRepository) {}
+
+  private mapCryptoError(error: unknown, operation: 'encrypt' | 'decrypt'): never {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (message.includes('BOOKMAKER_CREDENTIALS_KEY')) {
+      throw new ServiceUnavailableException(
+        'Bookmaker credentials encryption is not configured. Set BOOKMAKER_CREDENTIALS_KEY in backend/.env and restart the API.',
+      );
+    }
+
+    if (operation === 'decrypt') {
+      throw new BadRequestException('Stored bookmaker credentials could not be decrypted. Re-save credentials for this provider.');
+    }
+
+    throw new BadRequestException('Bookmaker credentials could not be encrypted. Check payload and encryption configuration.');
+  }
 
   private toSafeView(entity: {
     id: string;
@@ -56,15 +77,23 @@ export class BookmakerCredentialsService {
   async upsertForUser(userId: string, dto: UpsertBookmakerCredentialsDto): Promise<BookmakerCredentialsSafeView> {
     const current = await this.repository.findByUserAndProvider(userId, dto.provider);
 
-    const usernameEncrypted = dto.username !== undefined
-      ? encryptSecret(dto.username)
-      : current?.usernameEncrypted;
-    const passwordEncrypted = dto.password !== undefined
-      ? encryptSecret(dto.password)
-      : current?.passwordEncrypted;
-    const twoFactorSecretEncrypted = dto.twoFactorSecret !== undefined
-      ? encryptSecret(dto.twoFactorSecret)
-      : current?.twoFactorSecretEncrypted;
+    let usernameEncrypted: string | undefined;
+    let passwordEncrypted: string | undefined;
+    let twoFactorSecretEncrypted: string | undefined;
+
+    try {
+      usernameEncrypted = dto.username !== undefined
+        ? encryptSecret(dto.username)
+        : current?.usernameEncrypted;
+      passwordEncrypted = dto.password !== undefined
+        ? encryptSecret(dto.password)
+        : current?.passwordEncrypted;
+      twoFactorSecretEncrypted = dto.twoFactorSecret !== undefined
+        ? encryptSecret(dto.twoFactorSecret)
+        : current?.twoFactorSecretEncrypted;
+    } catch (error) {
+      this.mapCryptoError(error, 'encrypt');
+    }
 
     if (!usernameEncrypted || !passwordEncrypted) {
       throw new BadRequestException('username and password are required for first-time provider setup');
@@ -99,14 +128,18 @@ export class BookmakerCredentialsService {
       throw new BadRequestException('Incomplete credentials for provider');
     }
 
-    return {
-      provider,
-      loginUrl: row.loginUrl,
-      username: decryptSecret(row.usernameEncrypted),
-      password: decryptSecret(row.passwordEncrypted),
-      twoFactorSecret: row.twoFactorSecretEncrypted
-        ? decryptSecret(row.twoFactorSecretEncrypted)
-        : undefined,
-    };
+    try {
+      return {
+        provider,
+        loginUrl: row.loginUrl,
+        username: decryptSecret(row.usernameEncrypted),
+        password: decryptSecret(row.passwordEncrypted),
+        twoFactorSecret: row.twoFactorSecretEncrypted
+          ? decryptSecret(row.twoFactorSecretEncrypted)
+          : undefined,
+      };
+    } catch (error) {
+      this.mapCryptoError(error, 'decrypt');
+    }
   }
 }

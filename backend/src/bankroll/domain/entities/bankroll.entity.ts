@@ -14,6 +14,7 @@ export class BankrollEntity {
   stopLossPercentage: number;
   currency: string;
   isActive: boolean;
+  providerBalances: Record<string, number>;
 
   // Auto-bet settings
   autoBetEnabled: boolean;
@@ -34,8 +35,9 @@ export class BankrollEntity {
     this.kellyFraction = 0.5;
     this.stopLossEnabled = false;
     this.stopLossPercentage = 20;
-    this.currency = 'USD';
+    this.currency = 'BRL';
     this.isActive = true;
+    this.providerBalances = {};
     // Auto-bet defaults (safe off)
     this.autoBetEnabled = false;
     this.autoBetProvider = null;

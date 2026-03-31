@@ -175,6 +175,42 @@ export class AutoBetsService {
   ) {}
 
   /**
+   * Cron: resolve automatically all placed auto-bets whose match is finished.
+   */
+  @Cron('0 */3 * * * *')
+  async autoResolvePlacedBets(): Promise<void> {
+    // Busca todas as apostas automáticas com status 'placed'
+    const placedBets = await this.autoBetsRepository.findPlaced();
+    for (const bet of placedBets) {
+      // Busca o status do evento (match)
+      const match = await this.matchesService.findByMatchId(bet.matchId);
+      if (!match || match.status !== 'finished') continue;
+
+      // Determina o resultado
+      let outcome: 'won' | 'lost' | 'void' = 'void';
+      if (
+        typeof match.homeScore === 'number' &&
+        typeof match.awayScore === 'number'
+      ) {
+        if (
+          bet.market.toLowerCase().includes('resultado final') ||
+          bet.market.toLowerCase().includes('1x2')
+        ) {
+          if (bet.outcome === 'home' && match.homeScore > match.awayScore) outcome = 'won';
+          else if (bet.outcome === 'away' && match.awayScore > match.homeScore) outcome = 'won';
+          else if (bet.outcome === 'draw' && match.homeScore === match.awayScore) outcome = 'won';
+          else outcome = 'lost';
+        }
+        // Adapte para outros mercados se necessário
+      }
+
+      // Atualiza o status da aposta
+      await this.updateOutcome(bet.userId, bet.id, { outcome });
+      this.logger.log(`[AutoResolve] Bet ${bet.id} resolved as ${outcome}`);
+    }
+  }
+
+  /**
    * Called by ValueBetsService when a new value bet is detected.
    * Checks bankroll settings and enqueues the bet if automation is on.
    */

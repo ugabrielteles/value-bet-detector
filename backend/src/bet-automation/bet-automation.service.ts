@@ -482,24 +482,57 @@ export class BetAutomationService {
   }
 
   private async isBetanoLoginRequired(page: BrowserPage): Promise<boolean> {
+    this.logger.log('[isBetanoLoginRequired] ENTER function');
+    console.log('[isBetanoLoginRequired] ENTER function');
+    // Pequeno delay para garantir renderização
+    await page.waitForTimeout(1200);
     try {
       const pageWithEval = page as any;
-      if (typeof pageWithEval.evaluate !== 'function') return false;
+      if (typeof pageWithEval.evaluate !== 'function') {
+        this.logger.warn('[isBetanoLoginRequired] page.evaluate não disponível');
+        this.logger.log('[isBetanoLoginRequired] RETURN false (no evaluate)');
+        console.log('[isBetanoLoginRequired] RETURN false (no evaluate)');
+        return false;
+      }
 
       const required = await pageWithEval.evaluate(() => {
         const loginButton = document.querySelector('[data-qa="login-button"]') as HTMLElement | null;
-        if (!loginButton) return false;
+        if (!loginButton) {
+          // @ts-ignore
+          window.__loginDebug = 'Botão login não encontrado';
+          return false;
+        }
 
         const style = window.getComputedStyle(loginButton);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-        if (loginButton.offsetParent === null) return false;
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+          // @ts-ignore
+          window.__loginDebug = 'Botão login invisível';
+          return false;
+        }
+        if (loginButton.offsetParent === null) {
+          // @ts-ignore
+          window.__loginDebug = 'Botão login fora do fluxo visual';
+          return false;
+        }
 
         const label = String(loginButton.innerText || loginButton.textContent || '').trim().toLowerCase();
+        // @ts-ignore
+        window.__loginDebug = `Botão login encontrado: "${label}"`;
         return label.includes('entrar') || label.includes('login') || label.includes('iniciar sess');
       });
 
+      // Log extra: pega debug do browser
+      const debugMsg = await pageWithEval.evaluate(() => (window as any).__loginDebug || '');
+      this.logger.log(`[isBetanoLoginRequired] loginRequired=${!!required} | debug="${debugMsg}"`);
+      console.log(`[isBetanoLoginRequired] loginRequired=${!!required} | debug="${debugMsg}"`);
+
+      this.logger.log(`[isBetanoLoginRequired] RETURN ${Boolean(required)}`);
+      console.log(`[isBetanoLoginRequired] RETURN ${Boolean(required)}`);
       return Boolean(required);
-    } catch {
+    } catch (err) {
+      this.logger.warn(`[isBetanoLoginRequired] erro: ${err}`);
+      this.logger.log('[isBetanoLoginRequired] RETURN false (exception)');
+      console.log('[isBetanoLoginRequired] RETURN false (exception)');
       return false;
     }
   }
@@ -1088,13 +1121,27 @@ export class BetAutomationService {
           const titleNode = market.querySelector('.tw-self-center') as HTMLElement | null;
           const marketTitle = normalize(titleNode?.innerText || titleNode?.textContent || '');
 
+
+          // Variações robustas para o mercado de Resultado Final
           const strictResultFinalTitles = new Set([
             'resultado final',
+            'resultado final tempo regulamentar',
+            'resultado final (tempo regulamentar)',
             'match result',
             'full time result',
+            'final result',
+            'resultado',
+            'resultado do jogo',
           ]);
 
-          if (!strictResultFinalTitles.has(marketTitle)) return false;
+          if (!strictResultFinalTitles.has(marketTitle)) {
+            // Log para debug futuro (apenas em dev)
+            if (process.env.NODE_ENV !== 'production') {
+              // eslint-disable-next-line no-console
+              console.log('[BetAutomation] Ignored market title:', marketTitle);
+            }
+            return false;
+          }
 
           const marketText = normalize(market.textContent || '');
           if (marketText.includes('proximo gol') || marketText.includes('next goal')) return false;
@@ -1539,16 +1586,22 @@ export class BetAutomationService {
       addStep('Cookie/banner handling attempted');
       addStep(`Detected ${this.getSearchTargets(page).length} searchable frame(s)`);
 
-      if (!usingSavedSession) {
+      const loginRequired = await this.isBetanoLoginRequired(page);
+      if (loginRequired) {
+        addStep('Betano login button detected: session is not authenticated');
+        addStep('Executando login automático, mesmo com sessão persistente.');
+        // Betano often renders login fields only after opening a login modal/panel.
         const openedLoginPanel = await this.clickFirstAvailable(page, [
           'button:has-text("Entrar")',
           'button:has-text("Login")',
+          'button:has-text("Iniciar sessao")',
           'button:has-text("Iniciar sessão")',
           'button:has-text("Acessar")',
+          '[aria-label*="entrar" i]',
+          '[aria-label*="login" i]',
           'a:has-text("Entrar")',
           'a:has-text("Login")',
-          '[data-testid*="login" i]',
-          '[class*="login" i]',
+          '[data-qa="login-button"]',
         ]);
         if (openedLoginPanel) {
           addStep('Opened login modal/panel');
@@ -1559,21 +1612,18 @@ export class BetAutomationService {
         const userFilled = await this.fillFirstAvailable(page, [
           'input[name="username"]',
           'input[name="login"]',
-          'input[name="user"]',
           'input[autocomplete="username"]',
           'input[placeholder*="usuario" i]',
-          'input[placeholder*="nome" i]',
           'input[placeholder*="user" i]',
           'input[placeholder*="email" i]',
           'input[aria-label*="usuario" i]',
-          'input[aria-label*="login" i]',
+          'input[aria-label*="email" i]',
           'input[type="email"]',
           'input[type="text"]',
         ], credentials.username);
 
         const passFilled = await this.fillFirstAvailable(page, [
           'input[name="password"]',
-          'input[name="psw"]',
           'input[autocomplete="current-password"]',
           'input[placeholder*="senha" i]',
           'input[placeholder*="password" i]',
@@ -1616,7 +1666,7 @@ export class BetAutomationService {
         addStep('Submitted login form');
         await page.waitForTimeout(2500);
       } else {
-        addStep('Using saved persistent session, skipping login automation');
+        addStep('Sessão autenticada detectada, login automático não necessário.');
       }
 
       await page.goto(dto.eventUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -1645,13 +1695,7 @@ export class BetAutomationService {
       ], String(dto.stake));
 
       if (!stakeFilled) {
-        const artifacts = await this.saveDebugArtifacts(page, executionId, 'stake-not-found');
-        const details = [
-          'Could not fill stake field in Bet365 bet slip',
-          artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
-          artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
-        ].filter(Boolean).join(' | ');
-        throw new BadRequestException(details);
+        throw new BadRequestException('Could not fill stake field in Bet365 bet slip');
       }
 
       addStep('Filled stake amount');
@@ -1678,15 +1722,28 @@ export class BetAutomationService {
       const clickedConfirm = await this.clickFirstAvailable(page, [
         'button:has-text("Aposte já")',
         'button:has-text("Aposte ja")',
-        'button:has-text("Apostar")',
         'button:has-text("Aposta já")',
         'button:has-text("Aposta ja")',
+        'button:has-text("Aposte")',
+        'button:has-text("Apostar")',
         'button:has-text("Confirmar")',
+        'button:has-text("Confirm")',
         'button:has-text("Place Bet")',
+        '[data-qa*="place-bet"]',
+        '[data-testid*="place-bet"]',
+        '[data-test*="place-bet"]',
+        'xpath=//button[contains(translate(normalize-space(.), "ÁÀÃÂÉÊÍÓÔÕÚÇ", "AAAAEEIOOOUC"), "APOSTE")]',
+        'xpath=//button[contains(translate(normalize-space(.), "ÁÀÃÂÉÊÍÓÔÕÚÇ", "AAAAEEIOOOUC"), "APOSTAR")]',
       ]);
 
       if (!clickedConfirm) {
-        throw new BadRequestException('Could not find final confirmation button in Bet365 bet slip');
+        const artifacts = await this.saveDebugArtifacts(page, executionId, 'confirm-button-not-found');
+        const details = [
+          'Could not find final confirmation button in bet slip',
+          artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
+          artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
+        ].filter(Boolean).join(' | ');
+        throw new BadRequestException(details);
       }
 
       addStep('Clicked final bet confirmation button');
@@ -1784,15 +1841,7 @@ export class BetAutomationService {
       const loginRequired = await this.isBetanoLoginRequired(page);
       if (loginRequired) {
         addStep('Betano login button detected: session is not authenticated');
-      }
-
-      const shouldAutomateLogin = !usingSavedSession || loginRequired;
-
-      if (shouldAutomateLogin) {
-        if (usingSavedSession && loginRequired) {
-          addStep('Saved persistent session exists but is logged out; running login automation');
-        }
-
+        addStep('Executando login automático, mesmo com sessão persistente.');
         // Betano often renders login fields only after opening a login modal/panel.
         const openedLoginPanel = await this.clickFirstAvailable(page, [
           'button:has-text("Entrar")',
@@ -1869,7 +1918,7 @@ export class BetAutomationService {
         addStep('Submitted login form');
         await page.waitForTimeout(2500);
       } else {
-        addStep('Using saved persistent session, skipping login automation');
+        addStep('Sessão autenticada detectada, login automático não necessário.');
       }
 
       const hasEventUrl = this.hasUsableEventUrl(dto.eventUrl);

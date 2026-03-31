@@ -208,4 +208,9 @@ export class AutoBetsRepository {
       })),
     };
   }
+
+  async findPlaced(): Promise<AutoBetEntity[]> {
+    const docs = await this.model.find({ status: 'placed' }).sort({ createdAt: 1 }).exec();
+    return docs.map((d) => this.toEntity(d));
+  }
 }

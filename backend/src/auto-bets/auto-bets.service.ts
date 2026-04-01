@@ -8,7 +8,7 @@ import { Cron } from '@nestjs/schedule';
 import { AutoBetsRepository } from './infrastructure/repositories/auto-bets.repository';
 import { AutoBetEntity, AutoBetStatus } from './domain/entities/auto-bet.entity';
 import { BankrollService } from '../bankroll/bankroll.service';
-import { BetAutomationService } from '../bet-automation/bet-automation.service';
+import { AutomationError, BetAutomationService } from '../bet-automation/bet-automation.service';
 import { ValueBetsRepository } from '../value-bets/infrastructure/repositories/value-bets.repository';
 import { ValueBetEntity } from '../value-bets/domain/entities/value-bet.entity';
 import { UpdateAutoOutcomeDto } from './application/dtos/update-auto-outcome.dto';
@@ -518,6 +518,19 @@ export class AutoBetsService {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
 
+        // Persist any context discovered before the failure (event URL, balance)
+        if (err instanceof AutomationError) {
+          if (err.resolvedEventUrl) {
+            await this.autoBetsRepository.update(autoBet.id, { bookmakerUrl: err.resolvedEventUrl });
+            await this.valueBetsRepository.update(autoBet.valueBetId, { bookmakerUrl: err.resolvedEventUrl } as any);
+          }
+          if (typeof err.detectedBalance === 'number') {
+            try {
+              await this.bankrollService.syncProviderBalance(userId, provider, err.detectedBalance);
+            } catch { /* non-critical */ }
+          }
+        }
+
         if (this.isMissingBookmakerEventError(errMsg)) {
           return this.autoBetsRepository.update(autoBet.id, {
             status: 'skipped',
@@ -578,13 +591,32 @@ export class AutoBetsService {
       ? (result.steps as string[])
       : [`Automation result: ${JSON.stringify(result)}`];
 
+    const resolvedEventUrl = result?.resolvedEventUrl as string | undefined;
+    const detectedBalance = typeof result?.detectedBalance === 'number' ? result.detectedBalance : undefined;
+
+    // Sync bookmaker balance to bankroll whenever the automation detects it
+    if (detectedBalance !== undefined && provider) {
+      try {
+        await this.bankrollService.syncProviderBalance(userId, provider, detectedBalance);
+        this.logger.log(`AutoBet balance sync [user=${userId}, provider=${provider}]: R$ ${detectedBalance.toFixed(2)}`);
+      } catch (err) {
+        this.logger.warn(`AutoBet balance sync failed [user=${userId}]: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     const placed = await this.autoBetsRepository.update(autoBet.id, {
       status: 'placed',
       placedAt: new Date(),
       automationError: undefined,
       betSlipId: result?.betSlipId as string | undefined,
+      ...(resolvedEventUrl ? { bookmakerUrl: resolvedEventUrl } : {}),
       automationLog: [...autoBet.automationLog, ...retryNotes, ...log, `Placed at ${new Date().toISOString()}`],
     });
+
+    // Propagate discovered event URL back to the source value bet and its odds record
+    if (resolvedEventUrl && autoBet.valueBetId) {
+      await this.valueBetsRepository.update(autoBet.valueBetId, { bookmakerUrl: resolvedEventUrl } as any);
+    }
 
     this.logger.log(`AutoBet placed: ${autoBet.id} | dryRun=${isDryRun}`);
     return placed;

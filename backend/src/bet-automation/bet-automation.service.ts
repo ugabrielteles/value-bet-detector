@@ -6,6 +6,20 @@ import { RunBetanoBetDto } from './application/dtos/run-betano-bet.dto';
 import { RunBookmakerAutomationDto } from './application/dtos/run-bookmaker-automation.dto';
 import { BookmakerProvider } from '../bookmaker-credentials/domain/entities/bookmaker-credentials.entity';
 
+/**
+ * Extended error that carries context discovered before the failure.
+ * Allows callers to persist the resolved event URL even when the automation fails.
+ */
+export class AutomationError extends BadRequestException {
+  constructor(
+    message: string,
+    public readonly resolvedEventUrl?: string,
+    public readonly detectedBalance?: number,
+  ) {
+    super(message);
+  }
+}
+
 type SupportedAutomationProvider = Extract<BookmakerProvider, 'betano' | 'bet365'>;
 
 type ManualSessionState = {
@@ -637,6 +651,51 @@ export class BetAutomationService {
     }
   }
 
+  private async detectBetanoBalance(page: BrowserPage): Promise<number | null> {
+    const pageWithEval = page as any;
+    if (typeof pageWithEval.evaluate !== 'function') return null;
+    try {
+      const balance = await pageWithEval.evaluate(() => {
+        // Betano header renders balance as text like "R$ 123,45" or "123.45"
+        const selectors = [
+          '[data-qa="user-balance"]',
+          '[data-qa="header-balance"]',
+          '[data-qa="account-balance"]',
+          '[class*="userBalance"]',
+          '[class*="UserBalance"]',
+          '[class*="header-balance"]',
+          '[class*="HeaderBalance"]',
+        ];
+        for (const sel of selectors) {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (!el) continue;
+          const text = String(el.innerText || el.textContent || '').replace(/\s/g, '');
+          const match = text.match(/R?\$?\s*([\d.,]+)/);
+          if (match) {
+            const normalized = match[1].replace(/\./g, '').replace(',', '.');
+            const value = parseFloat(normalized);
+            if (!isNaN(value) && value >= 0) return value;
+          }
+        }
+        // Fallback: scan all header text for R$ pattern
+        const header = document.querySelector('header');
+        if (header) {
+          const text = String((header as HTMLElement).innerText || header.textContent || '');
+          const match = text.match(/R\$\s*([\d.]+(?:,\d{2})?)/);
+          if (match) {
+            const normalized = match[1].replace(/\./g, '').replace(',', '.');
+            const value = parseFloat(normalized);
+            if (!isNaN(value) && value >= 0) return value;
+          }
+        }
+        return null;
+      });
+      return typeof balance === 'number' ? balance : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async findLocatorInPageOrFrames(
     page: BrowserPage,
     selector: string,
@@ -769,11 +828,30 @@ export class BetAutomationService {
   }
 
   private async isBetanoLoginRequired(page: BrowserPage): Promise<boolean> {
-    // Wait for the page to render interactive elements
-    await page.waitForTimeout(1500);
     try {
       const pageWithEval = page as any;
-      if (typeof pageWithEval.evaluate !== 'function') return true; // Safer default: attempt login
+      if (typeof pageWithEval.evaluate !== 'function') return false;
+
+      // Race: wait up to 2s for either a login button OR an auth indicator to appear.
+      // This replaces the blind 1500ms wait and returns as soon as a signal is found.
+      const raceSelectors = [
+        '[data-qa="login-button"]',
+        '[data-qa="btn-login"]',
+        '[data-qa="user-balance"]',
+        '[data-qa="header-balance"]',
+        '[data-qa="header-deposit"]',
+        '[data-qa="user-menu"]',
+        '[data-qa="header-user"]',
+        '[class*="userBalance"]',
+        '[class*="UserBalance"]',
+        '[class*="depositBtn"]',
+        '[class*="DepositButton"]',
+      ];
+      try {
+        await pageWithEval.waitForSelector(raceSelectors.join(', '), { timeout: 2000 });
+      } catch {
+        // No selector appeared — proceed to evaluate what's on the page
+      }
 
       const result = await pageWithEval.evaluate(() => {
         const isVisible = (el: HTMLElement | null): boolean => {
@@ -804,16 +882,30 @@ export class BetAutomationService {
 
         // --- Signal 2: authenticated indicators present → NOT required ---
         const authSelectors = [
+          // data-qa patterns
           '[data-qa="user-balance"]',
           '[data-qa="account-balance"]',
           '[data-qa="user-menu"]',
           '[data-qa="my-account"]',
           '[data-qa="header-balance"]',
+          '[data-qa="header-deposit"]',
+          '[data-qa="header-user"]',
+          '[data-qa="header-user-info"]',
+          '[data-qa="user-info"]',
+          '[data-qa="deposit-button"]',
+          // class-based patterns
           '[class*="user-balance"]',
           '[class*="account-balance"]',
           '[class*="header-balance"]',
           '[class*="userBalance"]',
           '[class*="accountMenu"]',
+          '[class*="HeaderBalance"]',
+          '[class*="UserBalance"]',
+          '[class*="header__user"]',
+          '[class*="userMenu"]',
+          '[class*="UserMenu"]',
+          '[class*="depositBtn"]',
+          '[class*="DepositButton"]',
         ];
         for (const sel of authSelectors) {
           const el = document.querySelector(sel) as HTMLElement | null;
@@ -824,11 +916,36 @@ export class BetAutomationService {
           }
         }
 
-        // --- Signal 3: ambiguous — no login button AND no auth indicator ---
-        // Safer to attempt login than to skip it and fail later mid-flow.
+        // --- Signal 3: text-based auth indicators ---
+        // Logged-in Betano header always shows a deposit button and/or balance with R$
+        const allButtons = Array.from(document.querySelectorAll('header button, header a')) as HTMLElement[];
+        for (const btn of allButtons) {
+          if (!isVisible(btn)) continue;
+          const label = String((btn as any).innerText || btn.textContent || '').trim().toLowerCase();
+          if (label.includes('depositar') || label.includes('deposit') || label.includes('retirar') || label.includes('saldo')) {
+            // @ts-ignore
+            window.__loginDebug = `Logged-in action button found: "${label}"`;
+            return { loginRequired: false, reason: 'deposit-button-in-header' };
+          }
+        }
+
+        // Check for R$ balance text anywhere in the header
+        const header = document.querySelector('header');
+        if (header) {
+          const headerText = String((header as any).innerText || header.textContent || '');
+          if (/R\$\s*[\d,.]+/.test(headerText)) {
+            // @ts-ignore
+            window.__loginDebug = 'R$ balance found in header → logged in';
+            return { loginRequired: false, reason: 'balance-in-header' };
+          }
+        }
+
+        // --- Signal 4: ambiguous — no definitive signal found.
+        // Since credential-fill already checks for a visible login form before filling,
+        // defaulting to false here avoids a ~2min wasted login attempt on active sessions.
         // @ts-ignore
-        window.__loginDebug = 'No login button or auth indicator found — assuming login required';
-        return { loginRequired: true, reason: 'ambiguous-no-signals' };
+        window.__loginDebug = 'No signals found — assuming already authenticated (session active)';
+        return { loginRequired: false, reason: 'ambiguous-assume-authenticated' };
       });
 
       const debugMsg = await pageWithEval.evaluate(() => (window as any).__loginDebug || '').catch(() => '');
@@ -836,8 +953,8 @@ export class BetAutomationService {
 
       return Boolean(result.loginRequired);
     } catch (err) {
-      this.logger.warn(`[isBetanoLoginRequired] detection error: ${err} — assuming login required`);
-      return true; // Safer default on error
+      this.logger.warn(`[isBetanoLoginRequired] detection error: ${err} — assuming authenticated`);
+      return false;
     }
   }
 
@@ -1244,6 +1361,8 @@ export class BetAutomationService {
       .replace(/^1x2\s*/i, '')
       .replace(/^goals\s*over\s*\/\s*under\s*/i, '')
       .replace(/^goals\s*over\s*under\s*/i, '')
+      .replace(/^corners\s*over\s*\/\s*under\s*/i, '')
+      .replace(/^corners\s*over\s*under\s*/i, '')
       .trim();
 
     add(normalizedOutcome);
@@ -1280,20 +1399,42 @@ export class BetAutomationService {
       add('Fora');
     }
 
+    const isCornersContext = lower.includes('corner') || lower.includes('escante');
+
     const overMatch = lower.match(/over\s*([0-9]+(?:[\.,][0-9]+)?)/i);
     if (overMatch?.[1]) {
-      const line = overMatch[1].replace(',', '.');
+      const line = parseFloat(overMatch[1].replace(',', '.'));
       add(`Over ${line}`);
       add(`Mais de ${line}`);
       add(`Acima de ${line}`);
+
+      // For corners: also try adjacent lines in order of closeness
+      if (isCornersContext) {
+        const fallbackLines = [line - 1, line + 1, line - 2, line + 2].filter((l) => l > 0);
+        for (const fl of fallbackLines) {
+          const flStr = Number.isInteger(fl) ? `${fl}.5` : String(fl);
+          add(`Over ${flStr}`);
+          add(`Mais de ${flStr}`);
+        }
+      }
     }
 
     const underMatch = lower.match(/under\s*([0-9]+(?:[\.,][0-9]+)?)/i);
     if (underMatch?.[1]) {
-      const line = underMatch[1].replace(',', '.');
+      const line = parseFloat(underMatch[1].replace(',', '.'));
       add(`Under ${line}`);
       add(`Menos de ${line}`);
       add(`Abaixo de ${line}`);
+
+      // For corners: also try adjacent lines in order of closeness
+      if (isCornersContext) {
+        const fallbackLines = [line - 1, line + 1, line - 2, line + 2].filter((l) => l > 0);
+        for (const fl of fallbackLines) {
+          const flStr = Number.isInteger(fl) ? `${fl}.5` : String(fl);
+          add(`Under ${flStr}`);
+          add(`Menos de ${flStr}`);
+        }
+      }
     }
 
     return candidates;
@@ -1323,7 +1464,7 @@ export class BetAutomationService {
     }
 
     if (lower.includes('over') || lower.includes('under') || lower.includes('mais de') || lower.includes('menos de')) {
-      if (lower.includes('escante')) {
+      if (lower.includes('escante') || lower.includes('corner')) {
         add('Escanteios Mais/Menos');
       } else {
         add('Total de Gols Mais/Menos');
@@ -1350,6 +1491,44 @@ export class BetAutomationService {
     return String(value || '')
       .replace(/\\/g, '\\\\')
       .replace(/"/g, '\\"');
+  }
+
+  /**
+   * Checks whether an event tab matching `tabName` exists in the Betano tab bar.
+   * If found, clicks it and waits for the market list to update.
+   * Returns 'clicked' | 'already-active' | 'not-found'.
+   */
+  private async clickBetanoEventTab(
+    page: BrowserPage,
+    tabName: string,
+  ): Promise<'clicked' | 'already-active' | 'not-found'> {
+    const pageWithEval = page as any;
+    if (typeof pageWithEval.evaluate !== 'function') return 'not-found';
+
+    const result = await pageWithEval.evaluate((name: string) => {
+      const normalize = (v: string) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      const target = normalize(name);
+      const tabs = Array.from(document.querySelectorAll('.events-tabs-container__tab__item')) as HTMLElement[];
+      for (const tab of tabs) {
+        const label = normalize(tab.querySelector('.GTM-tab-name')?.textContent || tab.getAttribute('aria-label') || '');
+        if (label === target || label.includes(target)) {
+          const btn = tab.querySelector('[aria-label]') as HTMLElement | null || tab;
+          const isActive = btn.classList.contains('events-tabs-container__tab__item__button--active') ||
+            !!tab.querySelector('.events-tabs-container__tab__item__button--active');
+          if (isActive) return 'already-active';
+          btn.click();
+          return 'clicked';
+        }
+      }
+      return 'not-found';
+    }, tabName);
+
+    if (result === 'clicked') {
+      // Wait for markets to re-render after tab switch
+      await page.waitForTimeout(600);
+    }
+
+    return result as 'clicked' | 'already-active' | 'not-found';
   }
 
   private getBetano1x2Outcome(selectionText: string): 'home' | 'draw' | 'away' | null {
@@ -1420,30 +1599,35 @@ export class BetAutomationService {
         const normalizedAway = normalize(awayName);
         const drawTerms = ['empate', 'draw', 'x'];
 
+        // Variações robustas para o mercado de Resultado Final
+        const strictResultFinalTitles = new Set([
+          'resultado final',
+          'resultado final tempo regulamentar',
+          'resultado final (tempo regulamentar)',
+          'match result',
+          'full time result',
+          'final result',
+          'resultado',
+          'resultado do jogo',
+        ]);
+
+        const clickTarget = (el: HTMLElement): string => {
+          el.scrollIntoView({ block: 'center', inline: 'nearest' });
+          const eventInit: MouseEventInit = { bubbles: true, cancelable: true, composed: true };
+          el.dispatchEvent(new MouseEvent('pointerdown', eventInit));
+          el.dispatchEvent(new MouseEvent('mousedown', eventInit));
+          el.dispatchEvent(new MouseEvent('mouseup', eventInit));
+          el.dispatchEvent(new MouseEvent('click', eventInit));
+          const nameNode = el.querySelector('.s-name') as HTMLElement | null;
+          return String(nameNode?.innerText || nameNode?.textContent || '').trim() || 'unknown';
+        };
+
         const markets = Array.from(document.querySelectorAll('.markets__market')) as HTMLElement[];
         const targetMarket = markets.find((market) => {
           const titleNode = market.querySelector('.tw-self-center') as HTMLElement | null;
           const marketTitle = normalize(titleNode?.innerText || titleNode?.textContent || '');
 
-
-          // Variações robustas para o mercado de Resultado Final
-          const strictResultFinalTitles = new Set([
-            'resultado final',
-            'resultado final tempo regulamentar',
-            'resultado final (tempo regulamentar)',
-            'match result',
-            'full time result',
-            'final result',
-            'resultado',
-            'resultado do jogo',
-          ]);
-
           if (!strictResultFinalTitles.has(marketTitle)) {
-            // Log para debug futuro (apenas em dev)
-            if (process.env.NODE_ENV !== 'production') {
-              // eslint-disable-next-line no-console
-              console.log('[BetAutomation] Ignored market title:', marketTitle);
-            }
             return false;
           }
 
@@ -1454,37 +1638,88 @@ export class BetAutomationService {
           return true;
         });
 
-        if (!targetMarket) return null;
+        if (targetMarket) {
+          const selections = Array.from(targetMarket.querySelectorAll('[data-qa="event-selection"]')) as HTMLElement[];
+          const target = selections.find((selection) => {
+            if (!isVisible(selection)) return false;
+            const nameNode = selection.querySelector('.s-name') as HTMLElement | null;
+            const label = normalize(nameNode?.innerText || nameNode?.textContent || selection.innerText || selection.textContent || '');
+            if (!label) return false;
 
-        const selections = Array.from(targetMarket.querySelectorAll('[data-qa="event-selection"]')) as HTMLElement[];
-        const target = selections.find((selection) => {
+            if (desiredOutcome === 'draw') {
+              return drawTerms.some((term) => label === term || label.includes(` ${term} `) || label.startsWith(`${term} `) || label.endsWith(` ${term}`));
+            }
+            if (desiredOutcome === 'home') {
+              return normalizedHome ? label.includes(normalizedHome) : false;
+            }
+            return normalizedAway ? label.includes(normalizedAway) : false;
+          });
+
+          if (target) return clickTarget(target);
+        }
+
+        // Live layout fallback A: find [data-qa="event-selection"] whose .s-name matches desired outcome label
+        const allSelections = Array.from(document.querySelectorAll('[data-qa="event-selection"]')) as HTMLElement[];
+        const liveTargetByLabel = allSelections.find((selection) => {
           if (!isVisible(selection)) return false;
           const nameNode = selection.querySelector('.s-name') as HTMLElement | null;
           const label = normalize(nameNode?.innerText || nameNode?.textContent || selection.innerText || selection.textContent || '');
           if (!label) return false;
 
           if (desiredOutcome === 'draw') {
-            return drawTerms.some((term) => label === term || label.includes(` ${term} `) || label.startsWith(`${term} `) || label.endsWith(` ${term}`));
+            return drawTerms.some((term) => label === term);
           }
-
           if (desiredOutcome === 'home') {
-            return normalizedHome ? label.includes(normalizedHome) : false;
+            return normalizedHome ? label === normalizedHome || label.includes(normalizedHome) : false;
           }
-
-          return normalizedAway ? label.includes(normalizedAway) : false;
+          return normalizedAway ? label === normalizedAway || label.includes(normalizedAway) : false;
         });
 
-        if (!target) return null;
+        if (liveTargetByLabel) {
+          // Verify not inside an obviously wrong market
+          const parentMarket = liveTargetByLabel.closest('.markets__market') as HTMLElement | null;
+          if (parentMarket) {
+            const parentTitle = normalize(
+              (parentMarket.querySelector('.tw-self-center') as HTMLElement | null)?.innerText ||
+              (parentMarket.querySelector('.tw-self-center') as HTMLElement | null)?.textContent || '',
+            );
+            const rejectTitles = ['proximo gol', 'next goal', 'total de gols', 'handicap', 'escanteios', 'ambas equipes', 'resultado correto'];
+            if (!rejectTitles.some((t) => parentTitle.includes(t))) {
+              return clickTarget(liveTargetByLabel);
+            }
+          } else {
+            return clickTarget(liveTargetByLabel);
+          }
+        }
 
-        target.scrollIntoView({ block: 'center', inline: 'nearest' });
-        const eventInit: MouseEventInit = { bubbles: true, cancelable: true, composed: true };
-        target.dispatchEvent(new MouseEvent('pointerdown', eventInit));
-        target.dispatchEvent(new MouseEvent('mousedown', eventInit));
-        target.dispatchEvent(new MouseEvent('mouseup', eventInit));
-        target.dispatchEvent(new MouseEvent('click', eventInit));
+        // Live layout fallback B: Betano live mode may render each 1X2 outcome as its OWN
+        // .markets__market container whose TITLE (.tw-self-center) is the team name or "empate".
+        // Find the market whose title matches the desired outcome, then click the first visible button inside it.
+        const outcomeMarket = markets.find((market) => {
+          const titleNode = market.querySelector('.tw-self-center') as HTMLElement | null;
+          const marketTitle = normalize(titleNode?.innerText || titleNode?.textContent || '');
+          if (!marketTitle) return false;
 
-        const nameNode = target.querySelector('.s-name') as HTMLElement | null;
-        return String(nameNode?.innerText || nameNode?.textContent || '').trim() || 'unknown';
+          if (desiredOutcome === 'draw') {
+            return drawTerms.some((term) => marketTitle === term);
+          }
+          if (desiredOutcome === 'home') {
+            return normalizedHome ? marketTitle === normalizedHome || marketTitle.includes(normalizedHome) : false;
+          }
+          return normalizedAway ? marketTitle === normalizedAway || marketTitle.includes(normalizedAway) : false;
+        });
+
+        if (outcomeMarket) {
+          // Click the first visible selection/button inside this market
+          const btn = (
+            outcomeMarket.querySelector('[data-qa="event-selection"]') ||
+            outcomeMarket.querySelector('button') ||
+            outcomeMarket.querySelector('[role="button"]')
+          ) as HTMLElement | null;
+          if (btn && isVisible(btn)) return clickTarget(btn);
+        }
+
+        return null;
       },
       { desiredOutcome: outcome, homeName: homeTeamName, awayName: awayTeamName },
     );
@@ -1551,15 +1786,27 @@ export class BetAutomationService {
     if (marketCandidates.length > 0) {
       addStep(`Trying Betano market candidates: ${marketCandidates.join(' | ')}`);
 
-      const marketFilterSelectors = marketCandidates.map((market) => {
-        const escapedMarket = this.escapeSelectorText(market);
-        return `[data-qa="market_filter"]:has-text("${escapedMarket}")`;
-      });
+      // For corners markets, navigate to the "Escanteios" tab first.
+      // If the tab doesn't exist, the event has no corners market — skip immediately.
+      const isCornersMarket = marketCandidates.some((m) => m.toLowerCase().includes('escanteio'));
+      if (isCornersMarket) {
+        const tabResult = await this.clickBetanoEventTab(page, 'escanteios');
+        if (tabResult === 'not-found') {
+          addStep('Escanteios tab not found on this event — no corners market available, skipping');
+          return false;
+        }
+        addStep(`Escanteios tab: ${tabResult}`);
+      } else {
+        const marketFilterSelectors = marketCandidates.map((market) => {
+          const escapedMarket = this.escapeSelectorText(market);
+          return `[data-qa="market_filter"]:has-text("${escapedMarket}")`;
+        });
 
-      const focusedMarket = await this.clickFirstAvailable(page, marketFilterSelectors, 500);
-      if (focusedMarket) {
-        addStep('Focused matching Betano market filter before selecting outcome');
-        await page.waitForTimeout(250);
+        const focusedMarket = await this.clickFirstAvailable(page, marketFilterSelectors, 500);
+        if (focusedMarket) {
+          addStep('Focused matching Betano market filter before selecting outcome');
+          await page.waitForTimeout(250);
+        }
       }
     }
 
@@ -1919,7 +2166,7 @@ export class BetAutomationService {
         'button:has-text("Accept")',
         '#onetrust-accept-btn-handler',
         '[id*="accept" i]',
-      ]);
+      ], 500);
       addStep('Cookie/banner handling attempted');
       addStep(`Detected ${this.getSearchTargets(page).length} searchable frame(s)`);
 
@@ -1939,10 +2186,10 @@ export class BetAutomationService {
           'a:has-text("Entrar")',
           'a:has-text("Login")',
           '[data-qa="login-button"]',
-        ]);
+        ], 800);
         if (openedLoginPanel) {
           addStep('Opened login modal/panel');
-          await page.waitForTimeout(1500);
+          await page.waitForTimeout(800);
         }
 
         addStep('Trying to fill login credentials');
@@ -2183,7 +2430,7 @@ export class BetAutomationService {
         'button:has-text("Aceitar")',
         'button:has-text("Accept")',
         '#onetrust-accept-btn-handler',
-      ]);
+      ], 500);
       addStep('Cookie/banner handling attempted');
       addStep(`Detected ${this.getSearchTargets(page).length} searchable frame(s)`);
 
@@ -2203,10 +2450,10 @@ export class BetAutomationService {
           'a:has-text("Entrar")',
           'a:has-text("Login")',
           '[data-qa="login-button"]',
-        ]);
+        ], 800);
         if (openedLoginPanel) {
           addStep('Opened login modal/panel');
-          await page.waitForTimeout(1500);
+          await page.waitForTimeout(800);
         }
 
         // Confirm login form is actually open by checking for the submit button.
@@ -2245,9 +2492,16 @@ export class BetAutomationService {
         addStep('Sessão autenticada detectada, login automático não necessário.');
       }
 
+      const detectedBalance = await this.detectBetanoBalance(page);
+      if (detectedBalance !== null) {
+        addStep(`Detected Betano balance: R$ ${detectedBalance.toFixed(2)}`);
+      }
+
+      let resolvedEventUrl: string | undefined;
       const hasEventUrl = this.hasUsableEventUrl(dto.eventUrl);
       if (hasEventUrl) {
-        await page.goto(String(dto.eventUrl), { waitUntil: 'domcontentloaded', timeout: 60000 });
+        resolvedEventUrl = String(dto.eventUrl);
+        await page.goto(resolvedEventUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         addStep('Opened event page from provided URL');
       } else {
         const resolved = await this.resolveBetanoEventByTeams(
@@ -2271,6 +2525,11 @@ export class BetAutomationService {
           addStep('Event page networkidle timeout, continuing with fallback wait');
           await page.waitForTimeout(2500);
         }
+
+        resolvedEventUrl = await this.getPageUrl(page) || undefined;
+        if (resolvedEventUrl) {
+          addStep(`Resolved event URL: ${resolvedEventUrl}`);
+        }
       }
 
       if (await this.detectBetanoNoMarketsAvailable(page)) {
@@ -2282,7 +2541,7 @@ export class BetAutomationService {
           artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
           artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
         ].filter(Boolean).join(' | ');
-        throw new BadRequestException(details);
+        throw new AutomationError(details, resolvedEventUrl, detectedBalance ?? undefined);
       }
 
       const selected = await this.clickBetanoSelection(
@@ -2303,7 +2562,7 @@ export class BetAutomationService {
             artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
             artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
           ].filter(Boolean).join(' | ');
-          throw new BadRequestException(details);
+          throw new AutomationError(details, resolvedEventUrl, detectedBalance ?? undefined);
         }
 
         const artifacts = await this.saveDebugArtifacts(page, executionId, 'selection-not-found');
@@ -2312,7 +2571,7 @@ export class BetAutomationService {
           artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
           artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
         ].filter(Boolean).join(' | ');
-        throw new BadRequestException(details);
+        throw new AutomationError(details, resolvedEventUrl, detectedBalance ?? undefined);
       }
 
       // Wait for the bet slip to appear before trying to fill the stake
@@ -2331,7 +2590,7 @@ export class BetAutomationService {
       ], String(dto.stake));
 
       if (!stakeFilled) {
-        throw new BadRequestException('Could not fill stake field in bet slip');
+        throw new AutomationError('Could not fill stake field in bet slip', resolvedEventUrl, detectedBalance ?? undefined);
       }
 
       addStep('Filled stake amount');
@@ -2348,6 +2607,8 @@ export class BetAutomationService {
           reason: allowRealBetting
             ? 'Set dryRun=false and confirmRealBet=true to place a real bet'
             : 'ALLOW_REAL_BETTING is disabled on server',
+          resolvedEventUrl,
+          detectedBalance,
           startedAt,
           finishedAt,
           durationMs: finishedAt.getTime() - startedAt.getTime(),
@@ -2379,7 +2640,7 @@ export class BetAutomationService {
           artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
           artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
         ].filter(Boolean).join(' | ');
-        throw new BadRequestException(details);
+        throw new AutomationError(details, resolvedEventUrl, detectedBalance ?? undefined);
       }
 
       addStep('Clicked final bet confirmation button');
@@ -2394,7 +2655,7 @@ export class BetAutomationService {
           artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
           artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
         ].filter(Boolean).join(' | ');
-        throw new BadRequestException(details);
+        throw new AutomationError(details, resolvedEventUrl, detectedBalance ?? undefined);
       }
 
       if (confirmResult.betSlipId) {
@@ -2412,6 +2673,8 @@ export class BetAutomationService {
         dryRun: false,
         realBetPlaced: true,
         betSlipId: confirmResult.betSlipId,
+        resolvedEventUrl,
+        detectedBalance,
         startedAt,
         finishedAt,
         durationMs: finishedAt.getTime() - startedAt.getTime(),

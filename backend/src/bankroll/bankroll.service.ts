@@ -96,6 +96,22 @@ export class BankrollService {
     });
   }
 
+  async syncProviderBalance(userId: string, provider: string, balance: number): Promise<BankrollEntity> {
+    const bankroll = await this.getBankroll(userId);
+    const providerKey = this.normalizeProviderKey(provider);
+    if (!providerKey) return bankroll;
+
+    const providerBalances = { ...(bankroll.providerBalances ?? {}), [providerKey]: balance };
+    // Also update currentBankroll to keep it in sync when this is the configured provider
+    const configuredProvider = this.normalizeProviderKey(bankroll.autoBetProvider);
+    const updateCurrentBankroll = configuredProvider === providerKey;
+
+    return this.bankrollRepository.upsert(userId, {
+      providerBalances,
+      ...(updateCurrentBankroll ? { currentBankroll: balance } : {}),
+    });
+  }
+
   async getUsersWithAutoBetEnabled(): Promise<string[]> {
     return this.bankrollRepository.findUserIdsWithAutoBetEnabled();
   }

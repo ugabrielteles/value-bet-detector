@@ -1037,7 +1037,19 @@ function BetRow({
             {matchLabel ?? `Match ${bet.matchId.slice(0, 8)}`}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-white capitalize">{bet.bookmaker}</span>
+            {bet.bookmakerUrl ? (
+              <a
+                href={bet.bookmakerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-blue-400 hover:text-blue-300 capitalize underline-offset-2 hover:underline"
+                title="Abrir evento na bookmaker"
+              >
+                {bet.bookmaker} ↗
+              </a>
+            ) : (
+              <span className="text-sm font-medium text-white capitalize">{bet.bookmaker}</span>
+            )}
             <span className="text-gray-500">·</span>
             <span className="text-sm text-gray-300">{bet.market}</span>
             <span className="text-gray-500">·</span>
@@ -1068,11 +1080,6 @@ function BetRow({
           </div>
           {bet.automationError && ['failed', 'skipped'].includes(bet.status) && (
             <p className="text-xs text-red-400 mt-1">{bet.automationError}</p>
-          )}
-          {!bet.bookmakerUrl && (
-            <p className="text-xs text-amber-400 mt-1">
-              Falta link direto do evento. Para Betano, o sistema tentara localizar a partida pelos times automaticamente.
-            </p>
           )}
         </div>
 

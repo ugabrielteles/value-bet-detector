@@ -9,6 +9,9 @@ export class OddsEntity {
   awayOdds: number;
   overOdds?: number;
   underOdds?: number;
+  cornerOverOdds?: number;
+  cornerUnderOdds?: number;
+  cornerLine?: number;
   timestamp: Date;
   isSteamMove: boolean;
   previousOdds?: number;

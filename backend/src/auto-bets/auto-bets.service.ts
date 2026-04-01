@@ -13,6 +13,7 @@ import { ValueBetsRepository } from '../value-bets/infrastructure/repositories/v
 import { ValueBetEntity } from '../value-bets/domain/entities/value-bet.entity';
 import { UpdateAutoOutcomeDto } from './application/dtos/update-auto-outcome.dto';
 import { MatchesService } from '../matches/matches.service';
+import { PredictionsService } from '../predictions/predictions.service';
 
 export interface AutoBetsAnalytics {
   // Counters
@@ -172,7 +173,29 @@ export class AutoBetsService {
     private readonly betAutomationService: BetAutomationService,
     private readonly valueBetsRepository: ValueBetsRepository,
     private readonly matchesService: MatchesService,
+    private readonly predictionsService: PredictionsService,
   ) {}
+
+  /**
+   * Cron: every 3 minutes, recover bets stuck in 'placing' state for > 10 minutes.
+   * This handles crashes or network failures that left a bet mid-execution.
+   */
+  @Cron('0 */3 * * * *')
+  async recoverStuckPlacingBets(): Promise<void> {
+    const cutoff = new Date(Date.now() - 10 * 60 * 1000);
+    const stuckBets = await this.autoBetsRepository.findStuckPlacing(cutoff);
+    for (const bet of stuckBets) {
+      await this.autoBetsRepository.update(bet.id, {
+        status: 'failed',
+        automationError: 'Execution timed out in placing state (process crash or network failure)',
+        automationLog: [
+          ...bet.automationLog,
+          `AUTO-FAILED at ${new Date().toISOString()}: stuck in placing > 10 minutes`,
+        ],
+      });
+      this.logger.warn(`[PlacingRecovery] Bet ${bet.id} (user=${bet.userId}) stuck in placing > 10min → marked failed`);
+    }
+  }
 
   /**
    * Cron: resolve automatically all placed auto-bets whose match is finished.
@@ -186,22 +209,29 @@ export class AutoBetsService {
       const match = await this.matchesService.findByMatchId(bet.matchId);
       if (!match || match.status !== 'finished') continue;
 
-      // Determina o resultado
-      let outcome: 'won' | 'lost' | 'void' = 'void';
-      if (
-        typeof match.homeScore === 'number' &&
-        typeof match.awayScore === 'number'
-      ) {
-        if (
-          bet.market.toLowerCase().includes('resultado final') ||
-          bet.market.toLowerCase().includes('1x2')
-        ) {
-          if (bet.outcome === 'home' && match.homeScore > match.awayScore) outcome = 'won';
-          else if (bet.outcome === 'away' && match.awayScore > match.homeScore) outcome = 'won';
-          else if (bet.outcome === 'draw' && match.homeScore === match.awayScore) outcome = 'won';
-          else outcome = 'lost';
-        }
-        // Adapte para outros mercados se necessário
+      // Use predictionsService to evaluate the result for all relevant markets
+      // Map bet.outcome to selection string as used in predictions
+      let selection = bet.outcome;
+      // Heuristic mapping for common markets
+      if (bet.market.toLowerCase().includes('1x2') || bet.market.toLowerCase().includes('resultado final')) {
+        if (bet.outcome === 'home') selection = 'Home Win';
+        else if (bet.outcome === 'away') selection = 'Away Win';
+        else if (bet.outcome === 'draw') selection = 'Draw';
+      }
+
+      // Call predictionsService's evaluation logic
+      let result = this.predictionsService['evaluateOpportunityResultBySelection'](
+        match,
+        bet.market,
+        selection,
+      );
+
+      // Only allow 'won', 'lost', or 'void' for outcome
+      let outcome: 'won' | 'lost' | 'void';
+      if (result === 'won' || result === 'lost' || result === 'void') {
+        outcome = result;
+      } else {
+        outcome = 'void';
       }
 
       // Atualiza o status da aposta
@@ -235,6 +265,7 @@ export class AutoBetsService {
           `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: match not found (${valueBet.matchId}) - waiting grace window`,
         );
       }
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: match não encontrado para valueBet=${valueBet.id}`);
       return null;
     }
 
@@ -269,6 +300,7 @@ export class AutoBetsService {
           `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: match status is ${match.status}, only live is allowed`,
         );
       }
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: status do match (${match.status}) não é ao vivo para valueBet=${valueBet.id}`);
       return null;
     }
 
@@ -281,10 +313,12 @@ export class AutoBetsService {
     // Auto-bet feature gate
     if (!bankroll.autoBetEnabled) {
       this.logger.debug(`AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: autoBetEnabled=false`);
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: autoBetEnabled=false para user=${userId}`);
       return null;
     }
     if (!bankroll.autoBetProvider) {
       this.logger.debug(`AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: autoBetProvider not configured`);
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: autoBetProvider não configurado para user=${userId}`);
       return null;
     }
 
@@ -293,15 +327,14 @@ export class AutoBetsService {
       this.logger.debug(
         `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: provider mismatch configured=${configuredProvider} valueBet=${betProvider}`,
       );
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: provider mismatch para user=${userId}, valueBet=${valueBet.id}`);
       return null;
     }
 
     // Minimum value edge check
     const valueEdgePct = valueBet.value * 100;
-    if (valueEdgePct < (bankroll.autoBetMinValue ?? 5)) {
-      this.logger.debug(
-        `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: value edge ${valueEdgePct.toFixed(2)}% < min ${(bankroll.autoBetMinValue ?? 5).toFixed(2)}%`,
-      );
+    if (valueEdgePct < (bankroll.autoBetMinValue ?? 5)) {      
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: valueEdgePct (${valueEdgePct}) < minValue (${bankroll.autoBetMinValue ?? 5}) para valueBet=${valueBet.id}`);
       return null;
     }
 
@@ -309,15 +342,14 @@ export class AutoBetsService {
     const classOrder: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
     const minClass = bankroll.autoBetMinClassification ?? 'LOW';
     if ((classOrder[valueBet.classification] ?? 0) < (classOrder[minClass] ?? 0)) {
-      this.logger.debug(
-        `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: classification ${valueBet.classification} < min ${minClass}`,
-      );
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: classificação (${valueBet.classification}) < minClass (${minClass}) para valueBet=${valueBet.id}`);
       return null;
     }
 
     // Stop-loss check
     if (bankroll.isStopped) {
       this.logger.warn(`AutoBet skipped for user ${userId}: stop-loss triggered`);
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: stop-loss ativado para user=${userId}`);
       return this.autoBetsRepository.create({
         userId,
         valueBetId: valueBet.id,
@@ -342,13 +374,14 @@ export class AutoBetsService {
     const todayCount = await this.autoBetsRepository.countTodaySuccessfulForUser(userId);
     if (todayCount >= maxDaily) {
       this.logger.warn(`AutoBet skipped for user ${userId}: daily successful limit reached (${todayCount}/${maxDaily})`);
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: daily limit atingido para user=${userId}`);
       return null;
     }
 
     // Prevent duplicate
     const exists = await this.autoBetsRepository.existsForValueBet(userId, valueBet.id);
     if (exists) {
-      this.logger.debug(`AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: already exists`);
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: já existe autoBet para valueBet=${valueBet.id}`);
       return null;
     }
 
@@ -361,9 +394,7 @@ export class AutoBetsService {
     );
 
     if (stakeRec.isStopped || stakeRec.recommendedStake <= 0) {
-      this.logger.debug(
-        `AutoBet skip [user=${userId}, valueBet=${valueBet.id}]: invalid stake recommendation (stopped=${stakeRec.isStopped}, stake=${stakeRec.recommendedStake})`,
-      );
+      this.logger.debug(`[AutoBet][BLOCK] Motivo: stakeRec.isStopped=${stakeRec.isStopped} ou stake <= 0 para valueBet=${valueBet.id}`);
       return null;
     }
 

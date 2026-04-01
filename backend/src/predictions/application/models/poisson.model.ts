@@ -28,6 +28,20 @@ export class PoissonModel implements IPredictionModel {
       }
     }
 
+    // Corners Over/Under 9.5 using Poisson approximation
+    // Expected corners derived from XG: each XG unit generates ~1.6 corners, baseline ~5.5 per team
+    const homeExpectedCorners = 5.5 + homeXG * 1.6;
+    const awayExpectedCorners = 5.5 + awayXG * 1.6;
+    const totalExpectedCorners = homeExpectedCorners + awayExpectedCorners;
+    let cornerOverProb = 0;
+    const maxCorners = 30;
+    for (let c = 0; c <= maxCorners; c++) {
+      if (c > 9.5) {
+        cornerOverProb += ProbabilityUtils.poissonProbability(totalExpectedCorners, c);
+      }
+    }
+    const cornerOverProbability = Math.min(Math.max(cornerOverProb, 0), 1);
+
     return {
       homeProbability: home,
       drawProbability: draw,
@@ -35,6 +49,8 @@ export class PoissonModel implements IPredictionModel {
       overProbability: Math.min(overProb, 1),
       underProbability: Math.max(1 - overProb, 0),
       confidence: 0.7,
+      cornerOverProbability,
+      cornerUnderProbability: Math.max(1 - cornerOverProbability, 0),
     };
   }
 }

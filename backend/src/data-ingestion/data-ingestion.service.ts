@@ -471,6 +471,33 @@ export class DataIngestionService {
         if (under25?.odd) underOdds = Number(under25.odd) || undefined;
       }
 
+      // Try to extract Total Corners Over/Under odds (prefer 9.5 line)
+      let cornerOverOdds: number | undefined;
+      let cornerUnderOdds: number | undefined;
+      let cornerLine: number | undefined;
+      const cornersMarket = bets.find((b: any) => {
+        const n = String(b?.name ?? '').toLowerCase();
+        return n.includes('total corner') || n.includes('corner kick') || n.includes('corners over') || n === 'corners';
+      });
+      if (cornersMarket) {
+        // Prefer 9.5 line; fall back to any available line
+        const preferredLines = ['9.5', '10.5', '8.5'];
+        for (const line of preferredLines) {
+          const overVal = cornersMarket.values?.find((v: any) =>
+            String(v?.value ?? '').toLowerCase().replace(/\s/g, '') === `over${line}`,
+          );
+          const underVal = cornersMarket.values?.find((v: any) =>
+            String(v?.value ?? '').toLowerCase().replace(/\s/g, '') === `under${line}`,
+          );
+          if (overVal?.odd && underVal?.odd) {
+            cornerOverOdds = Number(overVal.odd) || undefined;
+            cornerUnderOdds = Number(underVal.odd) || undefined;
+            cornerLine = Number(line);
+            break;
+          }
+        }
+      }
+
       const bookmakerUrl = this.extractEventUrlFromPayload(bookmakerName, bookmaker?.id, [
         bookmaker,
         matchWinner,
@@ -491,6 +518,9 @@ export class DataIngestionService {
         awayOdds,
         overOdds,
         underOdds,
+        cornerOverOdds,
+        cornerUnderOdds,
+        cornerLine,
       };
     }
 

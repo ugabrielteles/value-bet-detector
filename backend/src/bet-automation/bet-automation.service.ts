@@ -86,6 +86,58 @@ export class BetAutomationService {
     return false;
   }
 
+  /**
+   * Types a value into a form field using real keyboard events at the page level.
+   * This is the most reliable approach for Vue/React inputs that ignore programmatic fill().
+   * Strategy: focus the element → clear via keyboard → type via page.keyboard (isTrusted events).
+   */
+  private async typeFirstAvailable(
+    page: BrowserPage,
+    selectors: string[],
+    value: string,
+    timeout = 500,
+  ): Promise<boolean> {
+    const pageAny = page as any;
+    const targets = this.getSearchTargets(page);
+
+    for (const target of targets) {
+      for (const selector of selectors) {
+        try {
+          const locator = (target as any).locator(selector).first();
+          await locator.waitFor({ state: 'visible', timeout });
+
+          // Click to focus the field
+          await locator.click({ timeout: 400 });
+          await page.waitForTimeout(80);
+
+          // Select all existing text and delete it
+          if (typeof pageAny.keyboard?.press === 'function') {
+            await pageAny.keyboard.press('Control+a');
+            await pageAny.keyboard.press('Delete');
+          } else {
+            await locator.fill('').catch(() => {});
+          }
+
+          // Type character-by-character at page level — generates real keyboard events
+          // that Vue v-model (including .lazy and .trim modifiers) always reacts to
+          if (typeof pageAny.keyboard?.type === 'function') {
+            await pageAny.keyboard.type(value, { delay: 60 });
+          } else {
+            await locator.pressSequentially(value, { delay: 60 });
+          }
+
+          // Trigger change event so Vue .lazy v-model updates
+          await locator.dispatchEvent('change').catch(() => {});
+          await page.waitForTimeout(80);
+          return true;
+        } catch {
+          // Try next selector/target.
+        }
+      }
+    }
+    return false;
+  }
+
   private async clickFirstAvailable(
     page: BrowserPage,
     selectors: string[],
@@ -431,6 +483,110 @@ export class BetAutomationService {
     }
   }
 
+  private async waitForBetanoBetstip(page: BrowserPage, timeoutMs = 6000): Promise<boolean> {
+    const stepMs = 300;
+    const maxChecks = Math.ceil(timeoutMs / stepMs);
+    const pageWithEval = page as any;
+    if (typeof pageWithEval.evaluate !== 'function') return true;
+
+    for (let i = 0; i < maxChecks; i++) {
+      await page.waitForTimeout(stepMs);
+      try {
+        const visible = await pageWithEval.evaluate(() => {
+          const betslip = document.querySelector(
+            '.betslip, [data-qa="betslip"], [data-testid="betslip"], [class*="betslip"], [class*="bet-slip"]',
+          ) as HTMLElement | null;
+          if (!betslip) return false;
+          const style = window.getComputedStyle(betslip);
+          return style.display !== 'none' && style.visibility !== 'hidden' && betslip.offsetParent !== null;
+        });
+        if (visible) return true;
+      } catch {
+        // ignore
+      }
+    }
+
+    return false;
+  }
+
+  private async detectBetanoConfirmationResult(page: BrowserPage): Promise<{ success: boolean; betSlipId?: string; error?: string }> {
+    const pageWithEval = page as any;
+    if (typeof pageWithEval.evaluate !== 'function') return { success: true };
+
+    try {
+      const result = await pageWithEval.evaluate(() => {
+        const normalize = (v: string): string => String(v || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const errorNeedles = [
+          'cotacao foi alterada',
+          'quota foi alterada',
+          'odds have changed',
+          'odds changed',
+          'saldo insuficiente',
+          'insufficient funds',
+          'insufficient balance',
+          'mercado suspenso',
+          'market suspended',
+          'aposta invalida',
+          'aposta nao aceite',
+          'bet not accepted',
+          'limite maximo',
+          'aposta rejeitada',
+          'bet rejected',
+          'erro ao colocar',
+          'error placing bet',
+        ];
+
+        const successNeedles = [
+          'aposta aceite',
+          'aposta confirmada',
+          'aposta realizada',
+          'bet accepted',
+          'bet confirmed',
+          'bet placed',
+          'aposta efetuada',
+          'aposta submetida',
+        ];
+
+        const isVisible = (el: HTMLElement): boolean => {
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
+        };
+
+        const candidates = Array.from(
+          document.querySelectorAll('.betslip, [data-qa="betslip"], [class*="betslip"], [class*="bet-slip"], [class*="receipt"], [class*="confirmation"], main'),
+        ) as HTMLElement[];
+
+        for (const container of candidates) {
+          if (!isVisible(container)) continue;
+          const text = normalize(container.innerText || container.textContent || '');
+          if (!text) continue;
+
+          const error = errorNeedles.find((needle) => text.includes(needle));
+          if (error) return { success: false, error: text.slice(0, 300) };
+
+          if (successNeedles.some((needle) => text.includes(needle))) {
+            // Try to extract a bet receipt/slip ID
+            const idMatch = text.match(/(?:ref|referencia|id|recibo)[:\s#]*([a-z0-9\-]{4,30})/i)
+              || text.match(/\b([0-9]{6,18})\b/);
+            return { success: true, betSlipId: idMatch?.[1] };
+          }
+        }
+
+        return { success: true }; // Could not determine — assume optimistic
+      });
+
+      return result as { success: boolean; betSlipId?: string; error?: string };
+    } catch {
+      return { success: true }; // Never fail due to detection errors
+    }
+  }
+
   private async detectBetanoNoMarketsAvailable(page: BrowserPage): Promise<boolean> {
     const pageWithEval = page as any;
     if (typeof pageWithEval.evaluate !== 'function') return false;
@@ -481,59 +637,207 @@ export class BetAutomationService {
     }
   }
 
+  private async findLocatorInPageOrFrames(
+    page: BrowserPage,
+    selector: string,
+    timeoutMs = 8000,
+  ): Promise<{ locator: any; context: any } | null> {
+    const targets = this.getSearchTargets(page); // [page, frame1, frame2, ...]
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      for (const target of targets) {
+        try {
+          const locator = (target as any).locator(selector).first();
+          await locator.waitFor({ state: 'visible', timeout: 400 });
+          return { locator, context: target };
+        } catch {
+          // not in this target yet
+        }
+      }
+      await page.waitForTimeout(300);
+    }
+
+    return null;
+  }
+
+  private async fillInFrame(
+    locator: any,
+    context: any,
+    value: string,
+  ): Promise<boolean> {
+    // Strategy 1: standard fill
+    try {
+      await locator.fill(value);
+      const val: string = await locator.inputValue().catch(() => '');
+      if (val) return true;
+    } catch {
+      // continue
+    }
+
+    // Strategy 2: keyboard.type via the FRAME's keyboard (not page.keyboard)
+    // When element is in a frame, use the frame's locator.pressSequentially
+    // which dispatches events directly on the element regardless of focus
+    try {
+      await locator.click({ timeout: 1000 });
+      await locator.pressSequentially(value, { delay: 60 });
+      await locator.dispatchEvent('change').catch(() => {});
+      const val: string = await locator.inputValue().catch(() => '');
+      if (val) return true;
+    } catch {
+      // continue
+    }
+
+    // Strategy 3: evaluate inside the frame context with native setter
+    try {
+      const filled = await (context as any).evaluate(
+        ({ val }: { val: string }) => {
+          // Find any visible, editable input in the frame
+          const candidates = Array.from(document.querySelectorAll('input:not([type="hidden"])')) as HTMLInputElement[];
+          const el = candidates.find((e) => {
+            if (e.readOnly || e.disabled) return false;
+            const s = window.getComputedStyle(e);
+            return s.display !== 'none' && s.visibility !== 'hidden' && e.offsetParent !== null;
+          });
+          if (!el) return false;
+          el.focus();
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+          setter ? setter.call(el, val) : (el.value = val);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        },
+        { val: value },
+      ).catch(() => false);
+      if (filled) return true;
+    } catch {
+      // continue
+    }
+
+    return false;
+  }
+
+  private async fillBetanoCredentials(
+    page: BrowserPage,
+    executionId: string,
+    username: string,
+    password: string,
+    addStep: (message: string) => void,
+  ): Promise<void> {
+    // --- Username ---
+    addStep('[login] Searching for username field across page and frames');
+    const usernameTarget = await this.findLocatorInPageOrFrames(
+      page,
+      '#username, input[name="username"], [aria-label="username"]',
+      8000,
+    );
+
+    if (!usernameTarget) {
+      const artifacts = await this.saveDebugArtifacts(page, executionId, 'login-username-not-visible');
+      throw new Error(`Username field not found in page or frames after 8s. screenshot=${artifacts.screenshotPath ?? 'n/a'}`);
+    }
+
+    addStep('[login] Username field found — filling');
+    const userOk = await this.fillInFrame(usernameTarget.locator, usernameTarget.context, username);
+    const userValue: string = await usernameTarget.locator.inputValue().catch(() => '');
+    addStep(`[login] Username value after fill: ${userValue ? '***filled***' : 'EMPTY'} | fillOk=${userOk}`);
+
+    if (!userValue) {
+      const artifacts = await this.saveDebugArtifacts(page, executionId, 'login-username-empty-after-fill');
+      throw new Error(`Username field filled but value is empty. screenshot=${artifacts.screenshotPath ?? 'n/a'}`);
+    }
+
+    await page.waitForTimeout(200);
+
+    // --- Password ---
+    addStep('[login] Searching for password field across page and frames');
+    const passwordTarget = await this.findLocatorInPageOrFrames(
+      page,
+      'input[type="password"], #password, input[name="password"]',
+      5000,
+    );
+
+    if (!passwordTarget) {
+      const artifacts = await this.saveDebugArtifacts(page, executionId, 'login-password-not-visible');
+      throw new Error(`Password field not found in page or frames after 5s. screenshot=${artifacts.screenshotPath ?? 'n/a'}`);
+    }
+
+    addStep('[login] Password field found — filling');
+    await this.fillInFrame(passwordTarget.locator, passwordTarget.context, password);
+
+    addStep('[login] Credentials filled');
+  }
+
   private async isBetanoLoginRequired(page: BrowserPage): Promise<boolean> {
-    this.logger.log('[isBetanoLoginRequired] ENTER function');
-    console.log('[isBetanoLoginRequired] ENTER function');
-    // Pequeno delay para garantir renderização
-    await page.waitForTimeout(1200);
+    // Wait for the page to render interactive elements
+    await page.waitForTimeout(1500);
     try {
       const pageWithEval = page as any;
-      if (typeof pageWithEval.evaluate !== 'function') {
-        this.logger.warn('[isBetanoLoginRequired] page.evaluate não disponível');
-        this.logger.log('[isBetanoLoginRequired] RETURN false (no evaluate)');
-        console.log('[isBetanoLoginRequired] RETURN false (no evaluate)');
-        return false;
-      }
+      if (typeof pageWithEval.evaluate !== 'function') return true; // Safer default: attempt login
 
-      const required = await pageWithEval.evaluate(() => {
-        const loginButton = document.querySelector('[data-qa="login-button"]') as HTMLElement | null;
-        if (!loginButton) {
-          // @ts-ignore
-          window.__loginDebug = 'Botão login não encontrado';
-          return false;
+      const result = await pageWithEval.evaluate(() => {
+        const isVisible = (el: HTMLElement | null): boolean => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          return el.offsetParent !== null;
+        };
+
+        // --- Signal 1: explicit login button present → login required ---
+        const loginSelectors = [
+          '[data-qa="login-button"]',
+          '[data-qa="btn-login"]',
+          '[data-testid="login-button"]',
+          'button[class*="login"]',
+          'a[class*="login"]',
+        ];
+        for (const sel of loginSelectors) {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (!isVisible(el)) continue;
+          const label = String((el as any).innerText || el?.textContent || '').trim().toLowerCase();
+          if (label.includes('entrar') || label.includes('login') || label.includes('iniciar sess') || label.includes('sign in')) {
+            // @ts-ignore
+            window.__loginDebug = `Login button found via "${sel}": "${label}"`;
+            return { loginRequired: true, reason: `login-button-found:${sel}` };
+          }
         }
 
-        const style = window.getComputedStyle(loginButton);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-          // @ts-ignore
-          window.__loginDebug = 'Botão login invisível';
-          return false;
-        }
-        if (loginButton.offsetParent === null) {
-          // @ts-ignore
-          window.__loginDebug = 'Botão login fora do fluxo visual';
-          return false;
+        // --- Signal 2: authenticated indicators present → NOT required ---
+        const authSelectors = [
+          '[data-qa="user-balance"]',
+          '[data-qa="account-balance"]',
+          '[data-qa="user-menu"]',
+          '[data-qa="my-account"]',
+          '[data-qa="header-balance"]',
+          '[class*="user-balance"]',
+          '[class*="account-balance"]',
+          '[class*="header-balance"]',
+          '[class*="userBalance"]',
+          '[class*="accountMenu"]',
+        ];
+        for (const sel of authSelectors) {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (isVisible(el)) {
+            // @ts-ignore
+            window.__loginDebug = `Auth indicator found via "${sel}" → logged in`;
+            return { loginRequired: false, reason: `auth-indicator-found:${sel}` };
+          }
         }
 
-        const label = String(loginButton.innerText || loginButton.textContent || '').trim().toLowerCase();
+        // --- Signal 3: ambiguous — no login button AND no auth indicator ---
+        // Safer to attempt login than to skip it and fail later mid-flow.
         // @ts-ignore
-        window.__loginDebug = `Botão login encontrado: "${label}"`;
-        return label.includes('entrar') || label.includes('login') || label.includes('iniciar sess');
+        window.__loginDebug = 'No login button or auth indicator found — assuming login required';
+        return { loginRequired: true, reason: 'ambiguous-no-signals' };
       });
 
-      // Log extra: pega debug do browser
-      const debugMsg = await pageWithEval.evaluate(() => (window as any).__loginDebug || '');
-      this.logger.log(`[isBetanoLoginRequired] loginRequired=${!!required} | debug="${debugMsg}"`);
-      console.log(`[isBetanoLoginRequired] loginRequired=${!!required} | debug="${debugMsg}"`);
+      const debugMsg = await pageWithEval.evaluate(() => (window as any).__loginDebug || '').catch(() => '');
+      this.logger.log(`[isBetanoLoginRequired] ${result.loginRequired ? 'LOGIN REQUIRED' : 'already authenticated'} | reason=${result.reason} | debug="${debugMsg}"`);
 
-      this.logger.log(`[isBetanoLoginRequired] RETURN ${Boolean(required)}`);
-      console.log(`[isBetanoLoginRequired] RETURN ${Boolean(required)}`);
-      return Boolean(required);
+      return Boolean(result.loginRequired);
     } catch (err) {
-      this.logger.warn(`[isBetanoLoginRequired] erro: ${err}`);
-      this.logger.log('[isBetanoLoginRequired] RETURN false (exception)');
-      console.log('[isBetanoLoginRequired] RETURN false (exception)');
-      return false;
+      this.logger.warn(`[isBetanoLoginRequired] detection error: ${err} — assuming login required`);
+      return true; // Safer default on error
     }
   }
 
@@ -1207,6 +1511,39 @@ export class BetAutomationService {
     }
 
     if (this.getBetano1x2Outcome(selectionText)) {
+      // Log all visible market titles before aborting
+      try {
+        const pageWithEval = page as any;
+        if (typeof pageWithEval.evaluate === 'function') {
+          const allMarketTitles = await pageWithEval.evaluate(() => {
+            const normalize = (value) => String(value || '')
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .toLowerCase()
+              .replace(/\s+/g, ' ')
+              .trim();
+            // Busca apenas dentro do container correto
+            const container = document.querySelector('.markets--live, .markets');
+            if (!container) return [];
+            return Array.from(container.querySelectorAll('.markets__market .tw-self-center'))
+              .filter(node => {
+                // Checa se está visível
+                const el = node as HTMLElement;
+                if (!(el instanceof HTMLElement)) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                return el.offsetParent !== null;
+              })
+              .map(node => {
+                const el = node as HTMLElement;
+                return normalize(el.innerText || el.textContent || '');
+              });
+          });
+          addStep(`[DEBUG] All visible market titles (scoped to .markets/.markets--live) before abort: ${allMarketTitles.join(' | ')}`);
+        }
+      } catch (err) {
+        addStep(`[DEBUG] Failed to log market titles: ${err}`);
+      }
       addStep('1x2 intent detected, but strict Resultado Final market mapping failed. Aborting generic fallback to avoid wrong-market selection.');
       return false;
     }
@@ -1605,24 +1942,34 @@ export class BetAutomationService {
         ]);
         if (openedLoginPanel) {
           addStep('Opened login modal/panel');
-          await page.waitForTimeout(800);
+          await page.waitForTimeout(1500);
         }
 
         addStep('Trying to fill login credentials');
-        const userFilled = await this.fillFirstAvailable(page, [
+        const usernameSelectors = [
+          '#username',
+          '[id="username"]',
           'input[name="username"]',
           'input[name="login"]',
+          '[aria-label="username"]',
+          'input[aria-label*="usuario" i]',
+          'input[aria-label*="email" i]',
           'input[autocomplete="username"]',
           'input[placeholder*="usuario" i]',
           'input[placeholder*="user" i]',
           'input[placeholder*="email" i]',
-          'input[aria-label*="usuario" i]',
-          'input[aria-label*="email" i]',
           'input[type="email"]',
-          'input[type="text"]',
-        ], credentials.username);
+        ];
+        // Use native setter approach to ensure Vue v-model reacts properly
+        const userFilled = await this.typeFirstAvailable(page, usernameSelectors, credentials.username)
+          || await this.fillFirstAvailable(page, usernameSelectors, credentials.username);
 
-        const passFilled = await this.fillFirstAvailable(page, [
+        // Brief pause so Vue processes the username input events before we shift focus to password
+        await page.waitForTimeout(300);
+
+        const passwordSelectors = [
+          '#password',
+          '[id="password"]',
           'input[name="password"]',
           'input[autocomplete="current-password"]',
           'input[placeholder*="senha" i]',
@@ -1630,7 +1977,9 @@ export class BetAutomationService {
           'input[aria-label*="senha" i]',
           'input[aria-label*="password" i]',
           'input[type="password"]',
-        ], credentials.password);
+        ];
+        const passFilled = await this.typeFirstAvailable(page, passwordSelectors, credentials.password)
+          || await this.fillFirstAvailable(page, passwordSelectors, credentials.password);
 
         if (!userFilled || !passFilled) {
           const artifacts = await this.saveDebugArtifacts(page, executionId, 'login-fields-not-found');
@@ -1857,66 +2206,41 @@ export class BetAutomationService {
         ]);
         if (openedLoginPanel) {
           addStep('Opened login modal/panel');
-          await page.waitForTimeout(800);
+          await page.waitForTimeout(1500);
         }
 
-        addStep('Trying to fill login credentials');
-        const userFilled = await this.fillFirstAvailable(page, [
-          'input[name="username"]',
-          'input[name="login"]',
-          'input[autocomplete="username"]',
-          'input[placeholder*="usuario" i]',
-          'input[placeholder*="user" i]',
-          'input[placeholder*="email" i]',
-          'input[aria-label*="usuario" i]',
-          'input[aria-label*="email" i]',
-          'input[type="email"]',
-          'input[type="text"]',
-        ], credentials.username);
+        // Confirm login form is actually open by checking for the submit button.
+        // If not found, the session is already active — skip credential filling.
+        const loginFormOpen = await this.findLocatorInPageOrFrames(
+          page,
+          'button:has-text("INICIAR"), button:has-text("Iniciar"), button[data-qa="login-submit"], button[type="submit"]',
+          2000,
+        );
 
-        const passFilled = await this.fillFirstAvailable(page, [
-          'input[name="password"]',
-          'input[autocomplete="current-password"]',
-          'input[placeholder*="senha" i]',
-          'input[placeholder*="password" i]',
-          'input[aria-label*="senha" i]',
-          'input[aria-label*="password" i]',
-          'input[type="password"]',
-        ], credentials.password);
+        if (!loginFormOpen) {
+          addStep('Login submit button not found — session already authenticated, skipping credential fill');
+        } else {
+          addStep('Login form detected — filling credentials');
+          await this.fillBetanoCredentials(page, executionId, credentials.username, credentials.password, addStep);
 
-        if (!userFilled || !passFilled) {
-          const artifacts = await this.saveDebugArtifacts(page, executionId, 'login-fields-not-found');
-          const details = [
-            'Could not locate login fields on Betano page',
-            artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
-            artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
-          ].filter(Boolean).join(' | ');
-          throw new BadRequestException(details);
+          addStep('Submitting Betano login form');
+          // Button text is "INICIAR SESSÃO" (all caps) — use partial lowercase match which Playwright resolves case-insensitively
+          const clickedLogin = await this.clickFirstAvailable(page, [
+            'button[data-qa="login-submit"]',
+            'button:has-text("INICIAR")',
+            'button:has-text("Iniciar")',
+            'button[type="submit"]',
+            'button:has-text("Entrar")',
+            'button:has-text("Acessar")',
+          ]);
+
+          if (!clickedLogin) {
+            throw new BadRequestException('Could not locate login submit button on Betano page');
+          }
+
+          addStep('Submitted login form');
+          await page.waitForTimeout(3000);
         }
-
-        addStep('Login fields filled');
-
-        await this.clickFirstAvailable(page, [
-          'button:has-text("Continuar")',
-          'button:has-text("Proximo")',
-          'button:has-text("Próximo")',
-          'button:has-text("Next")',
-        ]);
-
-        const clickedLogin = await this.clickFirstAvailable(page, [
-          'button[type="submit"]',
-          'button:has-text("Entrar")',
-          'button:has-text("Login")',
-          'button:has-text("Acessar")',
-          '[data-qa="login-submit"]',
-        ]);
-
-        if (!clickedLogin) {
-          throw new BadRequestException('Could not locate login button on Betano page');
-        }
-
-        addStep('Submitted login form');
-        await page.waitForTimeout(2500);
       } else {
         addStep('Sessão autenticada detectada, login automático não necessário.');
       }
@@ -1991,6 +2315,15 @@ export class BetAutomationService {
         throw new BadRequestException(details);
       }
 
+      // Wait for the bet slip to appear before trying to fill the stake
+      addStep('Waiting for bet slip to appear after selection click');
+      const betslipAppeared = await this.waitForBetanoBetstip(page);
+      if (!betslipAppeared) {
+        addStep('Bet slip did not appear within timeout — proceeding anyway');
+      } else {
+        addStep('Bet slip detected');
+      }
+
       const stakeFilled = await this.fillFirstAvailable(page, [
         'input[name="stake"]',
         'input[inputmode="decimal"]',
@@ -2050,7 +2383,25 @@ export class BetAutomationService {
       }
 
       addStep('Clicked final bet confirmation button');
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(2500);
+
+      // Verify the bookmaker actually accepted the bet
+      const confirmResult = await this.detectBetanoConfirmationResult(page);
+      if (!confirmResult.success) {
+        const artifacts = await this.saveDebugArtifacts(page, executionId, 'bet-rejected');
+        const details = [
+          `Bet rejected by Betano: ${confirmResult.error}`,
+          artifacts.screenshotPath ? `screenshot=${artifacts.screenshotPath}` : undefined,
+          artifacts.htmlPath ? `html=${artifacts.htmlPath}` : undefined,
+        ].filter(Boolean).join(' | ');
+        throw new BadRequestException(details);
+      }
+
+      if (confirmResult.betSlipId) {
+        addStep(`Bet confirmed — receipt ID: ${confirmResult.betSlipId}`);
+      } else {
+        addStep('Bet confirmation detected (no receipt ID extracted)');
+      }
 
       const finishedAt = new Date();
 
@@ -2060,6 +2411,7 @@ export class BetAutomationService {
         provider: 'betano',
         dryRun: false,
         realBetPlaced: true,
+        betSlipId: confirmResult.betSlipId,
         startedAt,
         finishedAt,
         durationMs: finishedAt.getTime() - startedAt.getTime(),

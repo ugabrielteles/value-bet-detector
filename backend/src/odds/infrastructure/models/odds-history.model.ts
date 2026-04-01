@@ -32,6 +32,15 @@ export class OddsHistory {
   @Prop()
   underOdds: number;
 
+  @Prop()
+  cornerOverOdds: number;
+
+  @Prop()
+  cornerUnderOdds: number;
+
+  @Prop()
+  cornerLine: number;
+
   @Prop({ required: true, index: true, default: Date.now })
   timestamp: Date;
 

@@ -7,7 +7,9 @@ import { AutoBet, AutoBetSchema } from './infrastructure/models/auto-bet.model';
 import { BankrollModule } from '../bankroll/bankroll.module';
 import { BetAutomationModule } from '../bet-automation/bet-automation.module';
 import { ValueBetsModule } from '../value-bets/value-bets.module';
+
 import { MatchesModule } from '../matches/matches.module';
+import { PredictionsModule } from '../predictions/predictions.module';
 
 @Module({
   imports: [
@@ -16,6 +18,7 @@ import { MatchesModule } from '../matches/matches.module';
     BetAutomationModule,
     ValueBetsModule,
     MatchesModule,
+    PredictionsModule,
   ],
   controllers: [AutoBetsController],
   providers: [AutoBetsService, AutoBetsRepository],

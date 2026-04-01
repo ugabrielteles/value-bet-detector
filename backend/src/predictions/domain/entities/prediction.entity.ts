@@ -6,6 +6,8 @@ export class PredictionEntity {
   awayProbability: number;
   overProbability: number;
   underProbability: number;
+  cornerOverProbability?: number;
+  cornerUnderProbability?: number;
   confidence: number;
   models: string[];
   createdAt: Date;

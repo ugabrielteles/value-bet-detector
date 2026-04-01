@@ -5,6 +5,8 @@ export interface PredictionResult {
   overProbability: number;
   underProbability: number;
   confidence: number;
+  cornerOverProbability?: number;
+  cornerUnderProbability?: number;
 }
 
 export interface PredictionInput {

@@ -23,6 +23,12 @@ export class Prediction {
   @Prop({ min: 0, max: 1, default: 0.5 })
   underProbability: number;
 
+  @Prop({ min: 0, max: 1 })
+  cornerOverProbability: number;
+
+  @Prop({ min: 0, max: 1 })
+  cornerUnderProbability: number;
+
   @Prop({ min: 0, max: 1, default: 0.7 })
   confidence: number;
 

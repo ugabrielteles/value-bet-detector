@@ -7,13 +7,13 @@ import { localeLabels } from '../../i18n/translations'
 
 const navItems = [
   { to: '/dashboard', key: 'dashboard', adminOnly: false },
-  { to: '/alerts', key: 'alerts', adminOnly: false },
-  { to: '/analytics', key: 'analytics', adminOnly: false },
+  // { to: '/alerts', key: 'alerts', adminOnly: false },
+  // { to: '/analytics', key: 'analytics', adminOnly: false },
   { to: '/live-opportunities', key: 'live', adminOnly: false },
   { to: '/data-ingestion', key: 'ingestion', adminOnly: false },
   { to: '/simulator', key: 'simulator', adminOnly: false },
   { to: '/bankroll', key: 'bankroll', adminOnly: false },
-  { to: '/automation', key: 'automation', adminOnly: false },
+  // { to: '/automation', key: 'automation', adminOnly: false },
   { to: '/auto-bets', key: 'autoBets', adminOnly: false },
   { to: '/admin/predictions', key: 'adminPredictions', adminOnly: true },
 ] as const
@@ -39,7 +39,7 @@ export default function Navigation() {
         <div className="flex items-center justify-between h-16">
           {/* Brand */}
           <NavLink to="/dashboard" className="flex items-center gap-2 text-white font-bold text-lg">
-            <span>⚽</span>
+           <span>⚽</span>
             <span>ValueBet</span>
           </NavLink>
 
@@ -59,11 +59,11 @@ export default function Navigation() {
                 }
               >
                 {dict.nav[item.key]}
-                {item.to === '/alerts' && newAlertsCount > 0 && (
+                {/* {item.to === '/alerts' && newAlertsCount > 0 && (
                   <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
                     {newAlertsCount > 99 ? '99+' : newAlertsCount}
                   </span>
-                )}
+                )} */}
               </NavLink>
             ))}
           </div>

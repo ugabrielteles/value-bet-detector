@@ -25,6 +25,14 @@ export class ValueBetsService {
     if (odds.underOdds && prediction.underProbability) {
       markets.push({ market: 'Goals Over/Under', outcome: 'Under 2.5', modelProbability: prediction.underProbability, bookmakerOdds: odds.underOdds });
     }
+    if (odds.cornerOverOdds && prediction.cornerOverProbability) {
+      const cornerOutcomeOver = odds.cornerLine ? `Over ${odds.cornerLine}` : 'Over 9.5';
+      markets.push({ market: 'Corners Over/Under', outcome: cornerOutcomeOver, modelProbability: prediction.cornerOverProbability, bookmakerOdds: odds.cornerOverOdds });
+    }
+    if (odds.cornerUnderOdds && prediction.cornerUnderProbability) {
+      const cornerOutcomeUnder = odds.cornerLine ? `Under ${odds.cornerLine}` : 'Under 9.5';
+      markets.push({ market: 'Corners Over/Under', outcome: cornerOutcomeUnder, modelProbability: prediction.cornerUnderProbability, bookmakerOdds: odds.cornerUnderOdds });
+    }
 
     const bets: ValueBetEntity[] = [];
 

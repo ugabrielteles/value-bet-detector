@@ -20,6 +20,8 @@ export class PredictionsRepository {
     entity.awayProbability = doc.awayProbability;
     entity.overProbability = doc.overProbability;
     entity.underProbability = doc.underProbability;
+    entity.cornerOverProbability = doc.cornerOverProbability;
+    entity.cornerUnderProbability = doc.cornerUnderProbability;
     entity.confidence = doc.confidence;
     entity.models = doc.models;
     entity.createdAt = (doc as unknown as { createdAt: Date }).createdAt;

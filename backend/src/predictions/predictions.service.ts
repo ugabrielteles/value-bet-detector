@@ -101,6 +101,10 @@ export class PredictionsService {
     const avg = (key: keyof PredictionResult) =>
       results.reduce((acc, r) => acc + (r[key] as number), 0) / n;
 
+    const cornerResults = results.filter((r) => r.cornerOverProbability !== undefined);
+    const cornerN = cornerResults.length;
+    const cornerOver = cornerN > 0 ? cornerResults.reduce((acc, r) => acc + r.cornerOverProbability!, 0) / cornerN : undefined;
+
     return {
       homeProbability: avg('homeProbability'),
       drawProbability: avg('drawProbability'),
@@ -108,6 +112,8 @@ export class PredictionsService {
       overProbability: avg('overProbability'),
       underProbability: avg('underProbability'),
       confidence: avg('confidence'),
+      cornerOverProbability: cornerOver,
+      cornerUnderProbability: cornerOver !== undefined ? Math.max(1 - cornerOver, 0) : undefined,
     };
   }
 

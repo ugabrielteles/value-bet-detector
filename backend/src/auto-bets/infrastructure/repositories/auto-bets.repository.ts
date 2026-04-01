@@ -213,4 +213,12 @@ export class AutoBetsRepository {
     const docs = await this.model.find({ status: 'placed' }).sort({ createdAt: 1 }).exec();
     return docs.map((d) => this.toEntity(d));
   }
+
+  async findStuckPlacing(cutoff: Date): Promise<AutoBetEntity[]> {
+    const docs = await this.model
+      .find({ status: 'placing', updatedAt: { $lt: cutoff } })
+      .sort({ updatedAt: 1 })
+      .exec();
+    return docs.map((d) => this.toEntity(d));
+  }
 }
